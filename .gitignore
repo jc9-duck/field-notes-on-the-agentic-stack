@@ -1,0 +1,8 @@
+# Working drafts / process notes — not for publication
+_working/
+
+# Secrets
+pi-multi-provider/.env
+
+# Session history / runtime state — not meant to be published
+pi-multi-provider/.pi/
