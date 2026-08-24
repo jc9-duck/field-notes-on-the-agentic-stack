@@ -34,7 +34,7 @@ jobs:
         run: docker build -t scan/${{ matrix.folder }}:ci ./${{ matrix.folder }}
 
       - name: Scan image
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: scan/${{ matrix.folder }}:ci
           format: table
