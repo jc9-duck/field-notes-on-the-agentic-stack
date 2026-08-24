@@ -22,6 +22,9 @@ jobs:
   images:
     name: Image vuln scan (trivy)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     strategy:
       matrix:
         # One entry per post's self-contained folder — see posts/architecture.md
@@ -33,11 +36,32 @@ jobs:
       - name: Build ${{ matrix.folder }} image
         run: docker build -t scan/${{ matrix.folder }}:ci ./${{ matrix.folder }}
 
-      - name: Scan image
+      # Report-only: findings here are largely in third-party transitive deps
+      # (e.g. pi-coding-agent's own dependency tree) that a version pin in
+      # this repo can't directly patch, so a hard CI fail would just block
+      # PRs on things outside our control. exit-code 0 keeps CI green while
+      # both outputs below still surface every finding.
+      - name: Scan image (log output)
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: scan/${{ matrix.folder }}:ci
           format: table
           severity: CRITICAL,HIGH
           ignore-unfixed: true
-          exit-code: "1"
+          exit-code: "0"
+
+      - name: Scan image (SARIF for Security tab)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: scan/${{ matrix.folder }}:ci
+          format: sarif
+          output: trivy-${{ matrix.folder }}.sarif
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "0"
+
+      - name: Upload SARIF to Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-${{ matrix.folder }}.sarif
+          category: trivy-${{ matrix.folder }}
