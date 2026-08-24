@@ -3,6 +3,8 @@ _working/
 
 # Secrets
 pi-multi-provider/.env
+model-router/.env
 
 # Session history / runtime state — not meant to be published
 pi-multi-provider/.pi/
+model-router/.pi/

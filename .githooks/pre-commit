@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Blocks commits containing secrets (API keys, tokens, credentials) via gitleaks.
+# Enabled per-clone via: git config core.hooksPath .githooks
+set -euo pipefail
+
+if ! command -v gitleaks >/dev/null 2>&1; then
+  echo "pre-commit: gitleaks not installed — skipping secret scan." >&2
+  echo "  Install it: brew install gitleaks" >&2
+  exit 0
+fi
+
+gitleaks protect --staged --redact --verbose
