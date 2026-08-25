@@ -30,10 +30,30 @@ RUN pi install npm:pi-subagents
 # awslabs.aws-api-mcp-server is superseded by AWS's managed one, reached only
 # through this proxy).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git awscli fd-find ripgrep python3-pip \
+    git awscli fd-find ripgrep python3-pip wget \
     && ln -s "$(command -v fdfind)" /usr/local/bin/fd \
     && pip install --break-system-packages --no-cache-dir uv \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
+# GitHub CLI: authenticates via GH_TOKEN env var at runtime (never baked into
+# the image), so `gh auth setup-git` in the entrypoint config below makes
+# `git push`/`gh repo create`/etc. work over HTTPS without touching SSH keys.
+# Avoids two problems: the host's global SSH config hardcodes an unrelated
+# identity for all github.com hosts (same issue already worked around for
+# this repo's own remote), and gh's token normally lives in the macOS
+# Keychain, which a Linux container can't read at all.
+RUN mkdir -p -m 755 /etc/apt/keyrings \
+    && wget -qO- https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+       | tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null \
+    && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+       > /etc/apt/sources.list.d/github-cli.list \
+    && apt-get update && apt-get install -y --no-install-recommends gh \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
 WORKDIR /work
+ENTRYPOINT ["entrypoint.sh"]
 CMD ["bash"]
