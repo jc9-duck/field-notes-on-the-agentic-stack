@@ -1,0 +1,69 @@
+# SwitchYard routing config for this folder's pi container.
+#
+# Two llm_clients, mirroring two of the providers pi already talks to
+# directly in this project's other folders:
+#   - nvidia: NVIDIA NIM, OpenAI-chat wire format, cloud, shared quota.
+#   - ollama: Ollama running natively on the Mac host (for Metal), reached
+#     via Docker's host.docker.internal bridge, OpenAI-chat wire format,
+#     free/instant.
+#
+# Amazon Bedrock is deliberately NOT wired in here. Bedrock's wire protocol
+# is "bedrock-converse-stream" (SigV4/bearer-token auth, a
+# /model/{id}/converse-stream path) — confirmed by inspecting pi's own
+# bundled provider catalog (amazon-bedrock.json) — and that isn't one of
+# Switchyard's three supported llm_client formats (openai_chat /
+# openai_responses / anthropic_messages). pi's built-in amazon-bedrock
+# provider stays available as a direct, non-routed choice alongside this.
+schema_version = 1
+
+[llm_clients.nvidia]
+format = "openai_chat"
+base_url = "https://integrate.api.nvidia.com/v1"
+api_key_env = "NVIDIA_API_KEY"
+max_retries = 6
+
+[llm_clients.ollama]
+format = "openai_chat"
+base_url = "http://host.docker.internal:11434/v1"
+
+[targets.local]
+# llama3.2:1b (the original pick) proved too weak for pi's actual
+# system-prompt weight: real end-to-end runs showed it repeatedly latching
+# onto fragments of pi's own tool-schema text instead of answering trivial
+# questions ("say hi", "capital of France"), both as the served model and
+# as the classifier itself (classifier_target below reuses this target).
+# llama3.1:8b is a real instruction-tuned model, already pulled on the host
+# — swapped in to see if actual instruction-following capacity, not routing
+# logic, was the missing piece.
+id = "llama3.1:8b"
+llm_client = "ollama"
+
+[targets.cloud]
+id = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"
+llm_client = "nvidia"
+
+# Main demo route: a cheap local classification call (reusing the weak
+# target as the classifier itself, per Switchyard's own getting-started
+# pattern) decides per-request whether the task is simple enough to stay on
+# local Ollama or should escalate to the cloud NVIDIA model.
+[routes.smart]
+id = "switchyard"
+type = "llm_classifier"
+mode = "capability"
+classifier_target = "local"
+weak_target = "local"
+strong_target = "cloud"
+base_threshold = 0.5
+
+# Manual-test routes: bypass the classifier and hit one provider directly
+# through Switchyard. Useful for curl-ing each leg in isolation, and for
+# `pi --provider switchyard --model local|cloud` to force a side.
+[routes.local]
+id = "local"
+type = "passthrough"
+target = "local"
+
+[routes.cloud]
+id = "cloud"
+type = "passthrough"
+target = "cloud"
