@@ -1,0 +1,29 @@
+services:
+  pi:
+    build: .
+    working_dir: /work
+    volumes:
+      - /Volumes/T7/pi/sandbox/mcp:/work
+      # Mount your host AWS credentials read-only rather than duplicating
+      # keys into env vars. AWS_PROFILE below selects which one to use.
+      - ~/.aws:/root/.aws:ro
+    environment:
+      - AWS_PROFILE=${AWS_PROFILE:-default}
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+      # Bedrock API key (bearer token) auth — simpler alternative to the
+      # SSO profile above. Export AWS_BEARER_TOKEN_BEDROCK in the shell
+      # you run `docker compose` from; never hardcode it here.
+      - AWS_BEARER_TOKEN_BEDROCK=${AWS_BEARER_TOKEN_BEDROCK:-}
+      # NVIDIA NIM (nvapi-... key from build.nvidia.com / NVIDIA Inference Hub).
+      - NVIDIA_API_KEY=${NVIDIA_API_KEY:-}
+      # Only needed if you're testing a non-Bedrock provider directly.
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      # GitHub CLI/git push auth. Export via `export GH_TOKEN=$(gh auth token)`
+      # on the host before running compose — never hardcode it here. Using a
+      # token instead of mounting host SSH keys or ~/.config/gh: the global
+      # SSH config forces an unrelated identity for all github.com hosts, and
+      # gh's token normally lives in the macOS Keychain, unreadable from Linux.
+      - GH_TOKEN=${GH_TOKEN:-}
+    stdin_open: true
+    tty: true
+    command: bash

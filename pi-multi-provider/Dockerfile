@@ -25,14 +25,9 @@ RUN pi install npm:pi-subagents
 # fails under corporate TLS-inspecting proxies (Zscaler etc.) with a cert
 # verification error since the container doesn't trust the injected root CA.
 # apt already goes through a working path, so route through it instead.
-# python3-pip + uv: needed to run `uvx mcp-proxy-for-aws` for the AWS MCP
-# Server configured in .mcp.json (see that file for why: the old self-hosted
-# awslabs.aws-api-mcp-server is superseded by AWS's managed one, reached only
-# through this proxy).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git awscli fd-find ripgrep python3-pip \
+    git awscli fd-find ripgrep \
     && ln -s "$(command -v fdfind)" /usr/local/bin/fd \
-    && pip install --break-system-packages --no-cache-dir uv \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /work

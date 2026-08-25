@@ -29,7 +29,7 @@ jobs:
       matrix:
         # One entry per post's self-contained folder — see posts/architecture.md
         # for why these aren't shared/DRY across folders.
-        folder: [pi-multi-provider, model-router]
+        folder: [pi-multi-provider, model-router, mcp]
     steps:
       - uses: actions/checkout@v4
 

@@ -3,7 +3,8 @@
   "defaultThinkingLevel": "medium",
   "retry": {
     "enabled": true,
-    "maxRetries": 3
+    "maxRetries": 6,
+    "baseDelayMs": 3000
   },
   "defaultProvider": "nvidia",
   "defaultModel": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
