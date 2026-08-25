@@ -10,10 +10,20 @@
 # version mismatch. Static musl linking sidesteps that entirely — the binary
 # has no libc dependency at all, so it runs in any base image. (Switchyard
 # uses rustls, not OpenSSL, so musl has no C-TLS-library complications here.)
+#
+# The musl target is picked from the builder's own arch (native build, not
+# cross-compiled) rather than hardcoded: `musl-tools` only provides a native
+# musl-gcc, so a hardcoded aarch64 target builds fine on Apple Silicon but
+# fails on x86_64 CI runners with "aarch64-linux-musl-gcc: No such file".
 FROM rust:latest AS switchyard-builder
-RUN rustup target add aarch64-unknown-linux-musl \
+RUN case "$(uname -m)" in \
+      x86_64) MUSL_TARGET=x86_64-unknown-linux-musl ;; \
+      aarch64) MUSL_TARGET=aarch64-unknown-linux-musl ;; \
+      *) echo "unsupported arch: $(uname -m)" >&2; exit 1 ;; \
+    esac \
+    && rustup target add "$MUSL_TARGET" \
     && apt-get update && apt-get install -y --no-install-recommends musl-tools \
-    && cargo install --locked switchyard-server --target aarch64-unknown-linux-musl
+    && cargo install --locked switchyard-server --target "$MUSL_TARGET"
 
 FROM node:22-slim
 

@@ -1,0 +1,18 @@
+version: 2
+updates:
+  # Each post's folder is a self-contained snapshot with its own Dockerfile —
+  # register each one separately rather than trying to share a single entry.
+  - package-ecosystem: "docker"
+    directory: "/pi-multi-provider"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "docker"
+    directory: "/model-router"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
