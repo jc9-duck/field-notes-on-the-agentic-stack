@@ -12,7 +12,7 @@ jobs:
     name: Secret scan (gitleaks)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - uses: gitleaks/gitleaks-action@v2
@@ -31,7 +31,7 @@ jobs:
         # for why these aren't shared/DRY across folders.
         folder: [pi-multi-provider, model-router, mcp]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Build ${{ matrix.folder }} image
         run: docker build -t scan/${{ matrix.folder }}:ci ./${{ matrix.folder }}
