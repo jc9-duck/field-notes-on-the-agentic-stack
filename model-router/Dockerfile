@@ -67,6 +67,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # NeMo switchyard-server, built in the switchyard-builder stage above.
 COPY --from=switchyard-builder /usr/local/cargo/bin/switchyard-server /usr/local/bin/switchyard-server
 
+# mermaid's browser bundle (dist/mermaid.min.js), installed to a fixed path
+# outside /work so it survives independent of the bind mount. trace-server.mjs
+# serves it as a static file — client-side rendering, no headless-browser/
+# Puppeteer dependency needed in this image just to draw one diagram.
+RUN npm install --no-save --prefix /opt/mermaid mermaid
+
 # entrypoint.sh starts switchyard-server in the background (against the
 # bind-mounted routes.toml, so routing changes don't need a rebuild) before
 # handing off to the container's actual command.

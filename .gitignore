@@ -14,7 +14,9 @@ mcp/.pi/
 # switchyard-server's own runtime logs — regenerated on every container start
 model-router/.switchyard.log
 model-router/switchyard-routing.jsonl
-model-router/trace.html
+model-router/.trace-server.log
+model-router/.failover-proxy.log
+model-router/failover.jsonl
 
 # Nested coding projects worked on from inside a container — their own repo,
 # not part of this series repo's tracking.

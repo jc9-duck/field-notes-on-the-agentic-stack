@@ -30,4 +30,16 @@ for _ in $(seq 1 20); do
   sleep 0.5
 done
 
+# trace-server.mjs: an always-running viewer over the two files above, not
+# a one-shot generator. Reconstructs full request history on every page
+# load — start it once here, leave it running, browse it whenever.
+node /work/trace-server.mjs >> /work/.trace-server.log 2>&1 &
+
+# failover-proxy.mjs: sits in front of switchyard-server (port 4000).
+# Switchyard's classifier picks a target by task complexity, not
+# availability — this adds the "if that target is actually down or
+# rate-limited, retry a different provider" layer Switchyard itself
+# doesn't have.
+node /work/failover-proxy.mjs >> /work/.failover-proxy.log 2>&1 &
+
 exec "$@"

@@ -23,10 +23,17 @@ services:
       - NVIDIA_API_KEY=${NVIDIA_API_KEY:-}
       # Only needed if you're testing a non-Bedrock provider directly.
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      # OpenAI direct — last resort in the failover chain, in case AWS
+      # itself is having an outage (from platform.openai.com).
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
     ports:
       # Publish switchyard-server's port so you can `curl localhost:4000/...`
       # from the Mac host directly, same as its own docs' verification steps.
       - "4000:4000"
+      # trace-server.mjs — browse request history at localhost:4321.
+      - "4321:4321"
+      # failover-proxy.mjs — the actual entrypoint pi talks to by default.
+      - "4100:4100"
     stdin_open: true
     tty: true
     command: bash

@@ -6,11 +6,12 @@
     "maxRetries": 6,
     "baseDelayMs": 3000
   },
-  "defaultProvider": "switchyard",
-  "defaultModel": "switchyard",
+  "defaultProvider": "auto",
+  "defaultModel": "auto",
   "sessionDir": "/work/.pi/sessions",
   "extensions": [
     "/work/pi-extensions/ollama-provider.mjs",
-    "/work/pi-extensions/switchyard-provider.mjs"
+    "/work/pi-extensions/switchyard-provider.mjs",
+    "/work/pi-extensions/failover-provider.mjs"
   ]
 }
