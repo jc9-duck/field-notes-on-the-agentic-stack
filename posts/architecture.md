@@ -255,3 +255,113 @@ sequenceDiagram
   dependency is almost certainly only feeding the Prometheus metrics side. Removed the
   `tempo` service, its datasource, and `tempo.yaml` entirely rather than keep dead weight in
   the stack.
+
+---
+
+## v4 — 2026-08-27 — Availability failover chain + live trace viewer (PR #17)
+
+### Description
+Two gaps closed, both driven by the same underlying fact: **`switchyard-server` has no
+concept of retrying a different provider on failure.** Its classifier (`routes.smart`)
+picks a target once, *before* the call, based on task complexity — not on whether that
+target is actually reachable. Confirmed directly against the schema and the standalone
+binary's own docs: no `fallback`, `on_error`, or ordered-target field exists anywhere. (A
+related NVIDIA product, NeMo Relay, *does* add exactly this — it uses Switchyard for the
+routing decision but layers its own dispatch/retry/trusted-fallback on top. That's not what
+we're running here.)
+
+**`failover-proxy.mjs`** is the layer that fills that gap — a small always-running Node HTTP
+server, started once from `entrypoint.sh` alongside `switchyard-server`, that pi now talks
+to by default (port 4100) instead of `switchyard-server` directly (port 4000, still reachable
+for manual testing). It tries Switchyard's own classifier-driven route first; only on a
+non-2xx response or network error does it retry the *same* request against a different
+Switchyard route — asking Switchyard for a different target, not calling providers directly
+itself. That matters: every attempt, including the failed ones, still gets logged by
+Switchyard exactly like any other request, so the existing routing log, debug trace,
+Grafana dashboard, and trace viewer all see fallback activity for free, with zero changes to
+any of them.
+
+The chain, cheapest/freest first: `switchyard` (the classifier's own nvidia/ollama pick) →
+`local-big` (`qwen2.5:14b`, a noticeably bigger local model — still $0, just slower, worth
+trying before spending anything) → `bedrock-gptoss` (`openai.gpt-oss-20b-1:0`, `$0.07/$0.3`
+per 1M tokens) → `bedrock-glm` (`zai.glm-5`, `$1/$3.2`). Verified the cascade logic itself
+works, not just individually-working rungs: temporarily put a nonexistent model first in the
+chain, confirmed a real 404 followed by real fallthrough to `switchyard`, logged in
+`failover.jsonl`, then reverted.
+
+**Real findings wiring Bedrock in as fallback targets** (each confirmed empirically, not
+assumed from docs):
+- **Amazon's own Nova models are not reachable through Switchyard at all.** They don't
+  appear in Bedrock's OpenAI-compatible model catalog on either `bedrock-runtime` or
+  `bedrock-mantle` — those surfaces only expose *third-party* models hosted on Bedrock
+  (Anthropic, Google, Mistral, Qwen, OpenAI's own `gpt-oss`, etc.), not Amazon's first-party
+  line. Nova is only reachable via Bedrock's native Converse API, the same wire protocol
+  already established as out of reach for Switchyard. Not a config gap — a real product
+  limitation.
+- **Claude models need `format = "anthropic_messages"`, not `openai_chat`** — confirmed via
+  AWS's own error text (`"does not support the '/v1/chat/completions' API"`). Correct
+  connection details (verified structurally, via a clean `permission_error` rather than a
+  protocol error): `POST https://bedrock-runtime.{region}.amazonaws.com/anthropic/v1/messages`,
+  header `x-api-key` (not `Authorization: Bearer`), `anthropic-version: 2023-06-01`, model
+  `us.anthropic.claude-sonnet-5`. Not wired in as a live target: this AWS account doesn't
+  have Bedrock model access granted for Claude yet — a one-time console step, not a config
+  problem. Documented rather than guessed further once the real blocker was identified.
+- `openai.gpt-oss-20b-1:0` and `zai.glm-5` (both open-weight-friendly, no Bedrock
+  model-access gate) confirmed working immediately via the same `openai_chat` client already
+  used for NVIDIA.
+
+**`trace-server.mjs`** replaces the one-shot `render-trace.mjs` from v3. The old script had
+to be re-run manually and only ever showed the *most recent* request — not what "run a
+session, then go back and look at the hops" actually needs. The new one is an
+always-running server (same pattern as `failover-proxy.mjs`: started once, left running),
+reconstructing full request history from `switchyard-routing.jsonl` + `.switchyard.log` on
+every page load. `http://localhost:4321/` lists every request seen so far, newest first,
+auto-refreshing; each one's detail page now renders an actual Mermaid `sequenceDiagram` —
+participants, arrows, the routing-decision note — above the existing hop ledger, rendered
+client-side from the real `mermaid` npm package's browser bundle (baked into the image at
+`/opt/mermaid`, served locally at `/static/mermaid.min.js`; no CDN, no headless-browser
+dependency just to draw one diagram).
+
+### Diagram — request flow with failover
+```mermaid
+sequenceDiagram
+    participant pi as pi (failover-provider.mjs)
+    participant fp as failover-proxy.mjs (:4100)
+    participant sy as switchyard-server (:4000)
+    participant ollama as Ollama (local)
+    participant cloud as NVIDIA / Bedrock
+
+    pi->>fp: POST /v1/chat/completions {model: "auto"}
+    fp->>sy: try model="switchyard" (classifier)
+    sy->>ollama: classify
+    ollama-->>sy: decision
+    alt classifier's pick succeeds
+        sy-->>fp: 200 completion
+    else classifier's pick fails (rate-limited, down, ...)
+        sy-->>fp: non-2xx
+        fp->>sy: retry model="local-big" (qwen2.5:14b)
+        sy->>ollama: forward
+        alt still failing
+            fp->>sy: retry model="bedrock-gptoss", then "bedrock-glm"
+            sy->>cloud: forward
+        end
+    end
+    fp-->>pi: completion (first success in the chain)
+```
+
+### Known-good state at this version
+- All four chain rungs (`switchyard`, `local-big`, `bedrock-gptoss`, `bedrock-glm`)
+  confirmed working individually, through Switchyard, with real responses.
+- Cascade logic itself proven (not just the individual rungs) via a deliberate injected
+  failure, logged in `failover.jsonl`.
+- `trace-server.mjs` confirmed serving live history at `:4321`, including a real rendered
+  Mermaid diagram per request.
+- Merged via PR #17 (`worktree-switchyard-routing` → `master`). One notable non-technical
+  wrinkle: the PR's original CI check suite got permanently orphaned by a live GitHub Actions
+  platform outage (confirmed via githubstatus.com, not assumed) mid-review — it never
+  completed and couldn't be cancelled through any API. Fix was the standard one for an
+  outage-orphaned check suite: push a fresh commit, which gets its own clean check suite tied
+  properly to the PR, rather than fighting the wedged one.
+- **Deliberately deferred, not broken:** OpenAI direct (`openai-gpt51` target, needs a real
+  `OPENAI_API_KEY`) and Claude on Bedrock (needs the model-access grant above) — both would
+  be small, mechanical additions once their respective prerequisites are met.
