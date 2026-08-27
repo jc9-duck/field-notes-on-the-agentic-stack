@@ -1,0 +1,156 @@
+# SwitchYard routing config for this folder's pi container.
+#
+# Two llm_clients, mirroring two of the providers pi already talks to
+# directly in this project's other folders:
+#   - nvidia: NVIDIA NIM, OpenAI-chat wire format, cloud, shared quota.
+#   - ollama: Ollama running natively on the Mac host (for Metal), reached
+#     via Docker's host.docker.internal bridge, OpenAI-chat wire format,
+#     free/instant.
+#
+# Update: Bedrock IS wired in below, via a client different from pi's own
+# built-in amazon-bedrock provider. That provider speaks Bedrock's native
+# "bedrock-converse-stream" wire protocol (SigV4/bearer-token, a
+# /model/{id}/converse-stream path) — not one of Switchyard's three
+# supported formats, so it genuinely can't be routed through here.
+# What changed: AWS separately shipped an OpenAI-compatible surface on
+# bedrock-runtime itself (confirmed via AWS's own endpoint docs, not
+# guessed) — reachable at a plain /openai/v1 path using the same
+# AWS_BEARER_TOKEN_BEDROCK bearer token already used elsewhere in this
+# project. That surface IS openai_chat-compatible, so it's just another
+# llm_client below, same shape as nvidia.
+schema_version = 1
+
+[llm_clients.nvidia]
+format = "openai_chat"
+base_url = "https://integrate.api.nvidia.com/v1"
+api_key_env = "NVIDIA_API_KEY"
+max_retries = 6
+
+[llm_clients.ollama]
+format = "openai_chat"
+base_url = "http://host.docker.internal:11434/v1"
+
+[llm_clients.bedrock]
+# bedrock-runtime's OpenAI-compatible Chat Completions surface. Confirmed
+# empirically this only works for models actually built to that wire shape
+# (openai.* models hosted on Bedrock) — Amazon's own Nova models are not
+# exposed here at all, and Anthropic Claude models exist but reject this
+# format outright ("does not support the /v1/chat/completions API").
+format = "openai_chat"
+base_url = "https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1"
+api_key_env = "AWS_BEARER_TOKEN_BEDROCK"
+max_retries = 2
+
+# Anthropic Claude on Bedrock needs a different client entirely (format =
+# "anthropic_messages", header "x-api-key" not "Authorization: Bearer") —
+# confirmed via a clean permission_error, meaning the request itself was
+# correctly formed, but blocked on this account's Bedrock model-access
+# grant. Not wired in for now: chose zai.glm-5 (open-source, no access gate,
+# confirmed working immediately) as the hefty tier instead. Revisit if
+# Claude access gets granted and a Claude-specific tier is wanted later.
+
+# llm_clients.openai (gpt-5.1, last resort in the failover chain) is not
+# wired in yet: switchyard-server validates every configured client's
+# api_key_env eagerly at startup and refuses to start at all if it's empty
+# — not a soft per-request failure, the whole server won't boot. Add it
+# back (client + targets.openai-gpt51 + routes.openai-gpt51 + CHAIN entry
+# in failover-proxy.mjs) once a real OPENAI_API_KEY is in .env.
+
+[targets.local]
+# llama3.2:1b (the original pick) proved too weak for pi's actual
+# system-prompt weight: real end-to-end runs showed it repeatedly latching
+# onto fragments of pi's own tool-schema text instead of answering trivial
+# questions ("say hi", "capital of France"), both as the served model and
+# as the classifier itself (classifier_target below reuses this target).
+# llama3.1:8b is a real instruction-tuned model, already pulled on the host
+# — swapped in to see if actual instruction-following capacity, not routing
+# logic, was the missing piece.
+id = "llama3.1:8b"
+llm_client = "ollama"
+
+[targets.cloud]
+id = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"
+llm_client = "nvidia"
+
+[targets.local-big]
+# A free step up before spending anything: if the classifier's own pick
+# fails (either leg — nvidia rate-limited, or ollama itself down), try a
+# noticeably bigger local model before falling through to paid Bedrock/
+# OpenAI. Still $0, just slower (~9GB at Q4, meaningfully heavier than
+# llama3.1:8b) — an acceptable tradeoff since this only fires on failure,
+# not on every request.
+id = "qwen2.5:14b"
+llm_client = "ollama"
+
+# Availability fallback chain, cheapest to most capable — not used by
+# routes.smart's classifier at all. These exist so failover-proxy.mjs (which
+# sits in front of Switchyard, see entrypoint.sh) has somewhere to retry a
+# request when the classifier's own choice (nvidia or ollama) fails outright,
+# not just when it's the "wrong" tier for the task. Switchyard itself has no
+# concept of "retry a different provider on error" — this fallback chain is
+# only meaningful because something outside Switchyard drives it.
+#
+# Amazon Nova (micro/lite) and Claude Haiku are deliberately NOT here.
+# Nova: confirmed unreachable via any Switchyard-compatible format — not in
+# Bedrock's OpenAI-compatible catalog at all, only its native Converse API.
+# Haiku: same account-level Bedrock model-access block as Sonnet below,
+# and its exact model ID on this surface is still unconfirmed — not worth
+# guessing further until access is actually granted.
+[targets.bedrock-gptoss]
+# Confirmed working end-to-end. Needed the "-1:0" suffix specifically —
+# the bare "openai.gpt-oss-20b" id (as listed by bedrock-mantle's own
+# /v1/models) was rejected as invalid on bedrock-runtime.
+id = "openai.gpt-oss-20b-1:0"
+llm_client = "bedrock"
+
+[targets.bedrock-glm]
+# GLM-5 (Z.AI), open-source, hosted on Bedrock — confirmed working
+# immediately with the bare model id, no access grant needed, $1/$3.2 per
+# 1M tokens. The hefty tier, standing in for Claude Sonnet until Bedrock
+# model access for Anthropic models is sorted out (see above).
+id = "zai.glm-5"
+llm_client = "bedrock"
+
+# Main demo route: a cheap local classification call (reusing the weak
+# target as the classifier itself, per Switchyard's own getting-started
+# pattern) decides per-request whether the task is simple enough to stay on
+# local Ollama or should escalate to the cloud NVIDIA model.
+[routes.smart]
+id = "switchyard"
+type = "llm_classifier"
+mode = "capability"
+classifier_target = "local"
+weak_target = "local"
+strong_target = "cloud"
+base_threshold = 0.5
+
+# Manual-test routes: bypass the classifier and hit one provider directly
+# through Switchyard. Useful for curl-ing each leg in isolation, and for
+# `pi --provider switchyard --model local|cloud` to force a side.
+[routes.local]
+id = "local"
+type = "passthrough"
+target = "local"
+
+[routes.cloud]
+id = "cloud"
+type = "passthrough"
+target = "cloud"
+
+# Fallback-chain routes — each just a plain passthrough, dialed directly by
+# failover-proxy.mjs's CHAIN constant when an earlier attempt fails. Not part
+# of the classifier; these never get picked by routes.smart on their own.
+[routes.local-big]
+id = "local-big"
+type = "passthrough"
+target = "local-big"
+
+[routes.bedrock-gptoss]
+id = "bedrock-gptoss"
+type = "passthrough"
+target = "bedrock-gptoss"
+
+[routes.bedrock-glm]
+id = "bedrock-glm"
+type = "passthrough"
+target = "bedrock-glm"

@@ -3,7 +3,12 @@ services:
     build: .
     working_dir: /work
     volumes:
-      - /Volumes/T7/pi/sandbox/model-router:/work
+      # Relative, not a hardcoded absolute path: this folder now gets checked
+      # out into different locations (worktrees), and a hardcoded path here
+      # would silently keep mounting whatever the original checkout was,
+      # regardless of where this compose file is actually run from. Compose
+      # resolves relative paths against this file's own directory.
+      - .:/work
       # Mount your host AWS credentials read-only rather than duplicating
       # keys into env vars. AWS_PROFILE below selects which one to use.
       - ~/.aws:/root/.aws:ro
@@ -18,6 +23,46 @@ services:
       - NVIDIA_API_KEY=${NVIDIA_API_KEY:-}
       # Only needed if you're testing a non-Bedrock provider directly.
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      # OpenAI direct — last resort in the failover chain, in case AWS
+      # itself is having an outage (from platform.openai.com).
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+    ports:
+      # Publish switchyard-server's port so you can `curl localhost:4000/...`
+      # from the Mac host directly, same as its own docs' verification steps.
+      - "4000:4000"
+      # trace-server.mjs — browse request history at localhost:4321.
+      - "4321:4321"
+      # failover-proxy.mjs — the actual entrypoint pi talks to by default.
+      - "4100:4100"
     stdin_open: true
     tty: true
     command: bash
+
+  # Scrapes switchyard-server's /metrics (Prometheus text, exposed by its
+  # own OpenTelemetry provider) from the pi container above. Reaches it via
+  # Compose's built-in DNS ("pi" service name), not the published host port.
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "127.0.0.1:9090:9090"
+    depends_on:
+      - pi
+
+  # Pre-provisioned (datasource + dashboard already loaded, anonymous
+  # Admin access) so there's no manual setup step — open
+  # http://localhost:3000 and the routing dashboard is just there.
+  grafana:
+    image: grafana/grafana:latest
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_AUTH_DISABLE_LOGIN_FORM=true
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      - prometheus

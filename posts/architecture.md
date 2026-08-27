@@ -154,3 +154,104 @@ identically under Colima — that resolution mechanism isn't Docker-Desktop-spec
 - Full end-to-end re-verified post-switch: `fd`/`rg` present, `ollama` extension loads,
   both local models register, real completion via `pi --provider ollama --model
   llama3.2:1b` returns actual output.
+
+---
+
+## v3 — 2026-08-25 — SwitchYard request routing + Prometheus/Grafana observability
+
+### Description
+`model-router/` (previously just a copy of the multi-provider setup with `switchyard-server`
+built into the image, unconfigured) now actually routes. `pi`'s only upstream is
+`switchyard-server`, itself running inside the same container, driven by a bind-mounted
+`routes.toml`: an `llm_classifier` route (`smart`/`switchyard`) fires a cheap classification
+call against the local Ollama model to decide, per request, whether to answer on local Ollama
+(`weak_target`) or escalate to cloud NVIDIA NIM (`strong_target`). Two `passthrough` routes
+(`local`, `cloud`) exist alongside it to force one side manually. A new `pi` extension,
+`switchyard-provider.mjs`, registers Switchyard's own routes as a `pi` provider (mirroring the
+existing `ollama-provider.mjs` pattern) — from `pi`'s perspective it makes one call to one
+model, `switchyard`; it never talks to NVIDIA or Ollama directly, and never learns which one
+actually served the request.
+
+**Amazon Bedrock is deliberately not part of this router.** Its wire protocol
+(`bedrock-converse-stream`: SigV4/bearer auth, a `/model/{id}/converse-stream` path —
+confirmed by inspecting `pi`'s own bundled `amazon-bedrock.json` provider catalog) isn't one
+of Switchyard's three supported `llm_client` formats (`openai_chat` / `openai_responses` /
+`anthropic_messages`). Bedrock stays available as `pi`'s plain built-in provider, outside the
+router — drift that's intentional, not a gap to close.
+
+Observability: `switchyard-server` runs with `RUST_LOG=switchyard_server=debug,libsy=debug`
+and `--routing-log-file`, giving a debug trace plus one clean JSON record per routed
+request (model, tier, token counts) in `switchyard-routing.jsonl` — both bind-mounted into
+`/work`, readable from the host. On top of that, `prometheus` and `grafana` were added as two
+more services in the same `docker-compose.yml`, scraping `switchyard-server`'s own
+`/metrics` (Prometheus text from its OpenTelemetry provider — `switchyard_llm_calls_total`,
+latency histograms, etc.). Grafana is fully pre-provisioned (anonymous Admin access, a
+`Prometheus` datasource, and a `switchyard-routing` dashboard all load automatically) — no
+manual setup step, just open `http://localhost:3000`.
+
+**A real bug found and fixed along the way:** `switchyard-server` failed to start against
+*any* config (`invalid server config: upstream transport error: builder error`) — even a
+config with only a plain-`http://` Ollama client, no NVIDIA/TLS involved at all. Root cause:
+`node:22-slim` doesn't ship the `ca-certificates` package, and `switchyard-server`'s HTTP
+client (`reqwest` + `rustls-platform-verifier`) needs a valid system root store to construct
+its one shared client at startup, regardless of whether any individual target uses TLS.
+`awscli`'s own bundled CA bundle had silently masked this gap in every prior Dockerfile in
+this project — added `ca-certificates` to `model-router/Dockerfile`'s apt install line.
+
+### Diagram — request flow through the router
+```mermaid
+sequenceDiagram
+    participant pi as pi (switchyard-provider.mjs)
+    participant sy as switchyard-server (:4000, same container)
+    participant ollama as Ollama (host.docker.internal)
+    participant nvidia as NVIDIA NIM (cloud)
+
+    pi->>sy: POST /v1/chat/completions {model: "switchyard", ...}
+    sy->>ollama: classify (weak target doubles as classifier)
+    ollama-->>sy: classification result
+    alt simple enough (below base_threshold)
+        sy->>ollama: forward actual request
+        ollama-->>sy: completion
+    else escalate
+        sy->>nvidia: forward actual request
+        nvidia-->>sy: completion
+    end
+    sy-->>pi: completion (pi never learns which target served it)
+```
+
+### Known-good state at this version
+- `switchyard-server` starts cleanly, all three routes (`switchyard`, `local`, `cloud`) list
+  via `GET /v1/models`; `GET /health` returns `{"status":"ok"}`.
+- Real end-to-end call confirmed via `pi -p "..."`: routing decision logged to both
+  `.switchyard.log` (DEBUG trace) and `switchyard-routing.jsonl` (structured record), request
+  actually reached the selected upstream (both NVIDIA and Ollama legs individually confirmed).
+- `prometheus` confirmed scraping `pi:4000/metrics` (target `health: up` via
+  `/api/v1/targets`); `grafana` dashboard loads pre-provisioned with no manual setup.
+- **Resolved:** `llama3.2:1b` (the original `weak`/local target and classifier) was not
+  reliably strong enough to handle `pi`'s actual system-prompt weight. Observed directly,
+  twice, with different trivial prompts: "say hi" and "what is the capital of France"
+  (prompt weight ~2050 tokens once `pi`'s full tool schema is included) both routed to local
+  and produced long, incoherent rambling about an unrelated "watchdog object" schema —
+  clearly latching onto fragments of its own context instead of answering. The *routing*
+  worked exactly as configured throughout (classifier called, decision logged, correct
+  target dialed); the *local model* was the weak link. Swapped `targets.local` in
+  `routes.toml` to `llama3.1:8b` (already pulled on the host from earlier work, no download
+  needed) — both prompts re-run afterward, one stayed local and one escalated to cloud, both
+  produced correct, coherent answers. **Real tradeoff, not free:** the 8B model is
+  meaningfully slower — the local "capital of France" answer took 18.2s total end-to-end vs.
+  ~7.5s with the 1B model, since the classifier call and the served call both now run on the
+  bigger model in sequence. Worth it for correctness; worth calling out honestly for the
+  write-up.
+- `render-trace.mjs` added: reads `switchyard-routing.jsonl` + `.switchyard.log` live and
+  regenerates a self-contained `trace.html` (no external libraries, no network calls) showing
+  the actual hop-by-hop path of whichever request ran most recently — reproducible by anyone
+  following along, not tied to any hosted link. Building it surfaced one more real bug:
+  `entrypoint.sh` was truncating `.switchyard.log` (`>`) on every container restart while
+  `--routing-log-file` kept appending, silently desyncing the two files. Fixed to `>>`.
+- **Tried and abandoned:** wired a `tempo` service and pointed
+  `OTEL_EXPORTER_OTLP_ENDPOINT` at it, hoping `switchyard-server`'s bundled
+  `opentelemetry-otlp` dependency meant it exported real distributed traces. Confirmed
+  empirically it does not — zero spans arrived after a real request, no errors either. That
+  dependency is almost certainly only feeding the Prometheus metrics side. Removed the
+  `tempo` service, its datasource, and `tempo.yaml` entirely rather than keep dead weight in
+  the stack.

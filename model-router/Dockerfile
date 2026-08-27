@@ -52,13 +52,33 @@ RUN pi install npm:pi-subagents
 # fails under corporate TLS-inspecting proxies (Zscaler etc.) with a cert
 # verification error since the container doesn't trust the injected root CA.
 # apt already goes through a working path, so route through it instead.
+# ca-certificates: node:22-slim doesn't ship it, and awscli's bundled
+# botocore CA bundle silently papered over the gap until switchyard-server
+# arrived — its reqwest/rustls-platform-verifier client fails to build at
+# all without a system root store (confirmed: "upstream transport error:
+# builder error" on every route, even a plain-http one, until this was
+# installed), since it needs one shared client regardless of per-target
+# scheme.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git awscli fd-find ripgrep \
+    git awscli fd-find ripgrep curl ca-certificates \
     && ln -s "$(command -v fdfind)" /usr/local/bin/fd \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # NeMo switchyard-server, built in the switchyard-builder stage above.
 COPY --from=switchyard-builder /usr/local/cargo/bin/switchyard-server /usr/local/bin/switchyard-server
 
+# mermaid's browser bundle (dist/mermaid.min.js), installed to a fixed path
+# outside /work so it survives independent of the bind mount. trace-server.mjs
+# serves it as a static file — client-side rendering, no headless-browser/
+# Puppeteer dependency needed in this image just to draw one diagram.
+RUN npm install --no-save --prefix /opt/mermaid mermaid
+
+# entrypoint.sh starts switchyard-server in the background (against the
+# bind-mounted routes.toml, so routing changes don't need a rebuild) before
+# handing off to the container's actual command.
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
 WORKDIR /work
+ENTRYPOINT ["entrypoint.sh"]
 CMD ["bash"]
