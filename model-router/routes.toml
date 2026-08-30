@@ -72,6 +72,30 @@ llm_client = "ollama"
 id = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"
 llm_client = "nvidia"
 
+# Task-type target for routes.smart-v2 below. NVIDIA NIM also serves a
+# code-specialized Qwen model behind the same integrate.api.nvidia.com
+# endpoint and NVIDIA_API_KEY — no new client needed. (There's no separate
+# targets.reasoning: Switchyard drops one of two targets that share the same
+# model id + client pair — "target X reuses model id ... only one target per
+# id is kept" — so routes.smart-v2 reuses targets.cloud directly instead.)
+[targets.coding]
+# Every dedicated code model in NVIDIA's own /v1/models catalog for this
+# account turned out to be a phantom listing: qwen/qwen2.5-coder-32b-instruct
+# is a hard 410 (EOL 2026-05-12), and codestral/codellama/codegemma/granite/
+# starcoder/deepseek-coder all 404 ("Function ... Not found for account") —
+# confirmed by curling each directly against integrate.api.nvidia.com, not
+# guessed. Checked Bedrock's catalog instead (same account, no new key
+# needed) and found a genuinely-hosted dedicated coder: Mistral's Devstral,
+# purpose-built for software-engineering tasks. Confirmed live against
+# bedrock-runtime (HTTP 200) and verified to produce correct, well-explained
+# code on a real prompt — a real coding-specialist model, not a substitute.
+# (qwen.qwen3-coder-next also works on this account if Devstral ever needs
+# a second option; qwen3-coder-30b/480b's ids from bedrock-mantle's listing
+# are rejected as invalid on bedrock-runtime, same class of quirk as
+# gpt-oss's "-1:0" suffix requirement above.)
+id = "mistral.devstral-2-123b"
+llm_client = "bedrock"
+
 [targets.local-big]
 # A free step up before spending anything: if the classifier's own pick
 # fails (either leg — nvidia rate-limited, or ollama itself down), try a
@@ -123,6 +147,61 @@ classifier_target = "local"
 weak_target = "local"
 strong_target = "cloud"
 base_threshold = 0.5
+
+# Task-type-aware route: a 3-way custom classifier, not the weak/strong
+# binary escalation routes.smart above does. Same judge model (local,
+# reused, free), but instead of estimating "can the weak model handle this,"
+# it reads the request and decides which of three specialized targets fits:
+# a simple/conversational tier, a coding-specialized model, or a
+# reasoning-specialized model. mode = "custom" is what unlocks this — the
+# packaged capability/escalation modes are hardcoded to exactly two targets
+# (weak_target/strong_target); custom mode takes an arbitrary `targets` list
+# instead, a free-form judge `prompt`, and a `response_schema` the judge's
+# JSON verdict must satisfy. `policy.selector` is a JSON Pointer
+# (jsonptr) into that verdict telling Switchyard which field names the
+# chosen target; a missing/unrecognized value falls back to
+# `default_target` rather than erroring the request.
+[routes.smart-v2]
+id = "switchyard-v2"
+type = "llm_classifier"
+mode = "custom"
+classifier_target = "local"
+targets = ["local", "coding", "cloud"]
+default_target = "local"
+prompt = """
+Classify the user's most recent request into exactly one category:
+- "local": simple conversational requests, greetings, or short factual
+  lookups that need no code and no multi-step reasoning.
+- "coding": requests to write, debug, review, or explain source code in
+  any programming language.
+- "cloud": requests that need deep multi-step reasoning, mathematical
+  proof, research synthesis, or complex analysis beyond simple recall.
+Return JSON matching the response schema supplied with the request.
+"""
+response_schema = '''
+{
+  "type": "object",
+  "properties": {
+    "decision": {
+      "type": "object",
+      "properties": {
+        "target": {
+          "type": "string",
+          "enum": ["local", "coding", "cloud"]
+        }
+      },
+      "required": ["target"],
+      "additionalProperties": false
+    }
+  },
+  "required": ["decision"],
+  "additionalProperties": false
+}
+'''
+
+[routes.smart-v2.policy]
+type = "target_selector"
+selector = "/decision/target"
 
 # Manual-test routes: bypass the classifier and hit one provider directly
 # through Switchyard. Useful for curl-ing each leg in isolation, and for
