@@ -60,7 +60,7 @@ RUN pi install npm:pi-subagents
 # installed), since it needs one shared client regardless of per-target
 # scheme.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git awscli fd-find ripgrep curl ca-certificates \
+    git awscli fd-find ripgrep curl ca-certificates jq \
     && ln -s "$(command -v fdfind)" /usr/local/bin/fd \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 

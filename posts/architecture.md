@@ -365,3 +365,109 @@ sequenceDiagram
 - **Deliberately deferred, not broken:** OpenAI direct (`openai-gpt51` target, needs a real
   `OPENAI_API_KEY`) and Claude on Bedrock (needs the model-access grant above) — both would
   be small, mechanical additions once their respective prerequisites are met.
+
+## v5 — 2026-08-30 — Task-type-aware routing: a real 3-way classifier (`routes.smart-v2`)
+
+`routes.smart` (v3) only ever does one thing: is this task easy enough for the weak model,
+or does it need to escalate to the strong one? That's a real dynamic decision — but it's
+binary, and it's about *capability tier*, not *task type*. The actual ask this version
+answers: can Switchyard read a prompt and route a coding request to a coding-specialized
+model, a deep-reasoning request to a reasoning-specialized model, and everything else to a
+cheap local model — three genuinely different backends chosen by content, not just two tiers
+of the same kind of judgment?
+
+**Yes — `llm_classifier`'s `mode = "custom"` is the mechanism, and it's a materially
+different schema from `mode = "capability"`:**
+
+| | `capability` (v3's `routes.smart`) | `custom` (`routes.smart-v2`) |
+|---|---|---|
+| targets | exactly two: `weak_target` / `strong_target` | a `targets` list, any size ≥ 2 |
+| judge's job | estimate `p_solve` (can the weak model do this?) | free-form: whatever your `prompt` asks it to decide |
+| judge's output | packaged verdict schema (`p_solve`, `capability_boundary`, ...) | your own `response_schema` — any structure |
+| how a target gets picked | deterministic threshold math on `p_solve` | `policy.selector`, a JSON Pointer (e.g. `/decision/target`) read out of the judge's verdict |
+| unusable verdict | falls back to `strong_target` | falls back to `default_target` |
+
+Confirmed against Switchyard's own docs before writing any config (`docs/routing_algorithms/llm_classifier_routing.md`), not guessed from the summarized capability-mode example — the actual field is `policy.selector` under `type = "target_selector"`, not a flat `target_selector` key as an early pass at this assumed.
+
+`routes.smart-v2` (`routes.toml`): same judge as before (`classifier_target = "local"`,
+reusing the free Ollama model — no new cost to classify), `targets = ["local", "coding",
+"cloud"]`, a custom `prompt` describing the three categories, a `response_schema` forcing
+`{"decision": {"target": "..."}}`, and `policy.selector = "/decision/target"`. `routes.smart`
+(v3) is untouched and still live — the two coexist for direct A/B comparison.
+
+**Real findings picking the `coding` target** (each confirmed by curling the provider
+directly, not assumed from a catalog listing):
+- Every dedicated code model in NVIDIA's own `/v1/models` catalog for this account turned
+  out to be dead weight. `qwen/qwen2.5-coder-32b-instruct` is a hard `410 Gone` — NVIDIA
+  retired it 2026-05-12. `codestral`, `codellama`, `codegemma`, `granite-code`, `starcoder2`,
+  and `deepseek-coder` all `404` with `"Function ... Not found for account"` — listed in the
+  catalog, never actually deployed for this key. A real product gap, the same class of
+  finding as v4's Nova/Claude blockers, just on NVIDIA's side this time.
+- Checked Bedrock's catalog next, same account, no new key needed — and it actually has
+  dedicated coders: `mistral.devstral-2-123b` (Devstral, purpose-built for
+  software-engineering tasks) and `qwen.qwen3-coder-next` both return real `200`s on
+  `bedrock-runtime`. Devstral produces genuinely correct, well-explained code on a real
+  prompt (reversing a linked list) — wired in as `targets.coding`. (Two of Bedrock's other
+  listed Qwen-coder variants, `-30b` and `-480b`, reject as invalid model IDs on
+  `bedrock-runtime` — the same class of quirk as `gpt-oss`'s `-1:0` suffix requirement in
+  v4, not chased further since two working coders was already enough.)
+- Re-tested Claude on Bedrock while here, since its catalog listing has grown since v4
+  (`claude-sonnet-5`, `claude-opus-5`, `claude-opus-4-7/4-8`, `claude-haiku-4-5` all now
+  appear). Still the identical `permission_error` on `claude-sonnet-5` — a bigger catalog
+  listing isn't evidence of account access; the actual blocker (the console model-access
+  grant from v4) is unchanged. Also confirmed: no Sonnet 4.x exists in this catalog at all,
+  only Haiku and Opus in that generation.
+- One config bug caught by `--dry-run` before it became a live bug: giving the `cloud`-tier
+  target a second name (`targets.reasoning`, same model id as `targets.cloud`) for readability
+  triggered a real warning — `switchyard-server` silently drops one of two targets that share
+  a model id + client pair. Fixed by having `routes.smart-v2` reference `targets.cloud`
+  directly instead of duplicating it.
+
+**Test cases, three prompts, one per target** — validated two ways, deliberately: a scripted
+test (`tests/test-custom-routing.sh`, checks the actual served `model` field against what
+each target should resolve to, `tests/README.md` covers what it does and doesn't prove) and
+a manual side-by-side curl walkthrough hitting the same live stack. Both agreed on all three:
+
+| Prompt | Classified as | Model served |
+|---|---|---|
+| "say hello in exactly 3 words" | `local` | `llama3.1:8b` (Ollama) |
+| Reverse a linked list, explain the pointers | `coding` | `mistral.devstral-2-123b` (Bedrock) |
+| Prove infinitude of primes, discuss Euclid's proof historically | `cloud` | `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning` (NVIDIA NIM) |
+
+### Diagram — task-type classification
+```mermaid
+sequenceDiagram
+    participant pi as pi
+    participant sy as switchyard-server (:4000)
+    participant judge as Ollama (llama3.1:8b, classifier_target)
+    participant local as targets.local
+    participant coding as targets.coding (Devstral)
+    participant cloud as targets.cloud (Nemotron reasoning)
+
+    pi->>sy: POST /v1/chat/completions {model: "switchyard-v2"}
+    sy->>judge: custom prompt + forced response_schema
+    judge-->>sy: {"decision": {"target": "..."}}
+    sy->>sy: policy.selector reads /decision/target
+    alt target = "local"
+        sy->>local: forward
+    else target = "coding"
+        sy->>coding: forward
+    else target = "cloud"
+        sy->>cloud: forward
+    end
+    sy-->>pi: completion from whichever target was picked
+```
+
+### Known-good state at this version
+- `routes.smart-v2` confirmed genuinely content-aware: three distinct prompts land on three
+  distinct, correctly-specialized backends, verified via both a scripted test and an
+  independent manual run against the same live stack, in full agreement.
+- `routes.smart` (v3, capability mode) untouched and still live alongside it.
+- Dockerfile gained `jq` (missing from the image since v3, discovered mid-session while
+  trying to read a JSON response by hand).
+- **Deliberately deferred, not broken:** Claude on Bedrock — same account-level
+  model-access-grant blocker as v4, re-confirmed rather than assumed stale. A genuinely
+  bigger/better `coding` model is also on the table if real `OPENAI_API_KEY` /
+  `ANTHROPIC_API_KEY` values get added later (direct clients, bypassing Bedrock's access-grant
+  question entirely) — not pursued this round since Devstral already closed the gap without
+  new keys.
