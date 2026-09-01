@@ -12,6 +12,15 @@ services:
       # Mount your host AWS credentials read-only rather than duplicating
       # keys into env vars. AWS_PROFILE below selects which one to use.
       - ~/.aws:/root/.aws:ro
+      # pi's Ctrl+V image paste writes the clipboard image to the host's
+      # temp dir and hands pi that absolute path. Without this, pi runs
+      # inside the container and that path doesn't exist there -- paste
+      # silently degrades to sending the path as plain text instead of an
+      # image (no error, just a model that "can't see" anything). Mounting
+      # $TMPDIR at the identical guest path makes the pasted file visible
+      # to the container under the exact path pi already has. Falls back to
+      # /tmp if $TMPDIR isn't exported in the shell running `docker compose`.
+      - ${TMPDIR:-/tmp}:${TMPDIR:-/tmp}:ro
     environment:
       - AWS_PROFILE=${AWS_PROFILE:-default}
       - AWS_REGION=${AWS_REGION:-us-east-1}
