@@ -70,13 +70,14 @@ deliberately manual-switch model: you point at it yourself when you have an
 image or screenshot to hand it.
 
 Generates a small solid-red PNG in-script (no fixture file, no image-library
-dependency — just `python3`'s stdlib `zlib`), then checks two paths against
+dependency — just `python3`'s stdlib `zlib`), then checks three paths against
 the same target:
 
 | Check | Path | Proves |
 |---|---|---|
 | curl direct | raw HTTP to Switchyard's `/v1/chat/completions` with `model: "vision"` | the route/target wiring, and that the model actually reads image content |
-| `pi --no-tools` | `pi --no-tools --provider switchyard --model vision -p "..." @image.png` | the real user-facing path works, not just raw HTTP |
+| `pi --no-tools` | `pi --no-tools --provider switchyard --model vision -p "..." @image.png` | the CLI escape hatch works, not just raw HTTP |
+| `set_model` (RPC) | switch to `switchyard/vision` mid-session (same mechanism as the TUI's `/model` picker or Ctrl+P), tools left on, then send an image prompt | the day-to-day path works: pick "vision" from `/model`, paste an image, no flags needed |
 
 ### Run it
 
@@ -86,10 +87,17 @@ docker compose exec pi bash tests/test-vision-route.sh
 docker compose run --rm pi bash tests/test-vision-route.sh
 ```
 
-### Known limitation: `--no-tools` is required
+### The real day-to-day path: `/model`
 
-Calling `routes.vision` from a normal `pi` session (full tool-schema system
-prompt, tools enabled) fails with:
+In the interactive TUI, type `/model`, pick `switchyard/vision`, then paste
+an image with Ctrl+V (Alt+V on Windows, or drag into the terminal) or attach
+one with `@path`. No flags to remember — `pi-extensions/vision-tools-guard.mjs`
+handles it (see below).
+
+### Known limitation, and how it's worked around
+
+Calling `routes.vision` from a normal `pi` session with tools enabled (full
+tool-schema system prompt) fails with:
 
 ```
 The number of image tokens (0) must be the same as the number of images (1)
@@ -100,7 +108,16 @@ miscounting image placeholder tokens once pi's large tool-schema system
 prompt is in the request — confirmed by the exact same image succeeding via
 plain curl (no tools involved) and failing only through `pi` with tools
 enabled. It's an upstream vLLM/mllama quirk, not a Switchyard routing bug or
-a config error: `--no-tools` shrinks the system prompt enough to avoid it,
-and you don't need tools to describe an image anyway. If this ever needs
-tools *and* vision in the same call, that's a real open problem, not
-something this route currently solves.
+a config error.
+
+`pi-extensions/vision-tools-guard.mjs` listens for pi's `model_select` event
+(fired by `/model`, Ctrl+P cycling, or session restore — not by CLI
+`--provider`/`--model` flags at startup, which never emit it) and calls
+`pi.setActiveTools([])` while `switchyard/vision` is active, restoring the
+previous tool set on switching away. This is the same fix `--no-tools` gives
+you manually on the CLI, just automatic for the picker-driven flow. If you
+invoke the route via `--provider`/`--model` at startup instead, you still
+need `--no-tools` yourself — the guard only fires on an in-session switch.
+
+If this ever needs tools *and* vision in the same call, that's a real open
+problem, not something this route or the guard currently solves.

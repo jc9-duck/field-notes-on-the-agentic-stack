@@ -7,17 +7,24 @@
 # a model you switch to on purpose when you have an image/screenshot to hand
 # it, not something the router auto-picks.
 #
-# Two checks, same target, two paths:
+# Three checks, same target, three paths:
 #   1. Direct curl through Switchyard's /v1/chat/completions — proves the
 #      target/route wiring and that the underlying model reads the image.
 #   2. `pi --no-tools --provider switchyard --model vision` — proves the
-#      actual user-facing path. --no-tools is required here: calling this
-#      route from a normal pi session (full tool-schema system prompt) hits
-#      an upstream vLLM bug in NVIDIA's Llama-3.2-Vision (mllama) deployment
-#      -- "The number of image tokens (0) must be the same as the number of
+#      CLI escape hatch. --no-tools is required here: calling this route
+#      from a normal pi session (full tool-schema system prompt) hits an
+#      upstream vLLM bug in NVIDIA's Llama-3.2-Vision (mllama) deployment --
+#      "The number of image tokens (0) must be the same as the number of
 #      images (1)" -- caused by pi's large system prompt confusing the
 #      model's image-placeholder counting. Not a Switchyard or config bug;
 #      see tests/README.md.
+#   3. Switching to "vision" via RPC's set_model (the same mechanism as the
+#      TUI's /model picker or Ctrl+P cycling) with tools left on — proves
+#      pi-extensions/vision-tools-guard.mjs actually saves you from check 2's
+#      bug: it listens for model_select and auto-disables tools while
+#      switchyard/vision is active, restoring them on switching away. This is
+#      the real, intended day-to-day path: pick "vision" from /model, paste
+#      an image, no flags to remember.
 #
 # Run from inside the pi container (needs switchyard-server on
 # 127.0.0.1:4000, jq, and python3, all already baked into the image):
@@ -85,6 +92,31 @@ if [[ "$pi_output" =~ [Rr]ed ]]; then
 else
   fail "pi --no-tools" "expected output containing 'red', got: $pi_output"
 fi
+
+# --- Check 3: switching via RPC set_model (the /model picker's mechanism), tools left on ---
+rpc_out=$(mktemp)
+{
+  jq -nc '{type: "set_model", provider: "switchyard", modelId: "vision"}'
+  sleep 2
+  jq -nc --arg img "$img_b64" '{
+    type: "prompt",
+    message: "What color is this image? Answer with exactly one word.",
+    images: [{type: "image", data: $img, mimeType: "image/png"}]
+  }'
+  sleep 15
+} | pi --mode rpc --no-session --provider switchyard --model local > "$rpc_out" 2>&1
+
+guard_fired=$(grep -c 'Tools disabled for switchyard/vision' "$rpc_out" || true)
+rpc_content=$(grep '"type":"message_end"' "$rpc_out" \
+  | jq -r 'select(.message.role=="assistant") | .message.content[]? | select(.type=="text") | .text' \
+  | tail -1)
+
+if [[ "$guard_fired" -ge 1 && "$rpc_content" =~ [Rr]ed ]]; then
+  pass "set_model (/model picker) -> guard fired, model said '$rpc_content'"
+else
+  fail "set_model (/model picker)" "guard_fired=$guard_fired content=${rpc_content:-<none>}. events: $(tail -c 500 "$rpc_out")"
+fi
+rm -f "$rpc_out"
 
 echo
 echo "$pass_count passed, $fail_count failed"

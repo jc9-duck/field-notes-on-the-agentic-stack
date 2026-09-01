@@ -117,7 +117,9 @@ llm_client = "bedrock"
 # of images (1)" — NVIDIA's vLLM-hosted mllama (Llama-3.2-Vision) backend
 # miscounts image placeholder tokens against pi's large tool-schema system
 # prompt. Confirmed via curl (works, no tools involved) vs. through pi
-# (fails). Use `pi --no-tools` when calling this route — see tests/README.md.
+# (fails). CLI `--provider`/`--model` startup needs `--no-tools` yourself;
+# switching via /model or Ctrl+P mid-session is handled automatically by
+# pi-extensions/vision-tools-guard.mjs — see tests/README.md.
 id = "meta/llama-3.2-11b-vision-instruct"
 llm_client = "nvidia"
 
