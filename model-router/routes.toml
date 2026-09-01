@@ -96,6 +96,31 @@ llm_client = "nvidia"
 id = "mistral.devstral-2-123b"
 llm_client = "bedrock"
 
+[targets.vision]
+# Manual-switch image target — none of the routes above accept images: the
+# smart-v2 judge and every text target it can pick were never checked against
+# vision input, and blind-forwarding an image through them would either be
+# silently ignored or upstream-error depending on the model. This is a
+# separate, deliberately unrouted passthrough model instead (see routes.vision
+# below) — you pick it explicitly when you have an image to paste.
+# meta/llama-3.2-11b-vision-instruct confirmed live on this NVIDIA account
+# (HTTP 200, correctly read a real test image) — same catalog that had
+# multiple phantom listings for coding models above. microsoft/phi-3-vision
+# -128k-instruct, nvidia/vila, and nvidia/neva-22b, all also listed in
+# NVIDIA's /v1/models, are more of those phantoms: 404 "Function ... Not
+# found for account". meta/llama-3.2-90b-vision-instruct is also real and
+# untested here — bigger/slower, worth trying if 11b proves too coarse on
+# dense screenshots.
+#
+# Known gotcha, not a config bug: calling this route from a normal pi session
+# fails with "The number of image tokens (0) must be the same as the number
+# of images (1)" — NVIDIA's vLLM-hosted mllama (Llama-3.2-Vision) backend
+# miscounts image placeholder tokens against pi's large tool-schema system
+# prompt. Confirmed via curl (works, no tools involved) vs. through pi
+# (fails). Use `pi --no-tools` when calling this route — see tests/README.md.
+id = "meta/llama-3.2-11b-vision-instruct"
+llm_client = "nvidia"
+
 [targets.local-big]
 # A free step up before spending anything: if the classifier's own pick
 # fails (either leg — nvidia rate-limited, or ollama itself down), try a
@@ -215,6 +240,11 @@ target = "local"
 id = "cloud"
 type = "passthrough"
 target = "cloud"
+
+[routes.vision]
+id = "vision"
+type = "passthrough"
+target = "vision"
 
 # Fallback-chain routes — each just a plain passthrough, dialed directly by
 # failover-proxy.mjs's CHAIN constant when an earlier attempt fails. Not part

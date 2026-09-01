@@ -59,3 +59,48 @@ comments on `[targets.coding]` for the full story:
 - **Config not reloaded.** `switchyard-server` reads `routes.toml` once at
   startup; editing the file while the container is already running does
   nothing until it's restarted (`docker compose restart pi`).
+
+## test-vision-route.sh
+
+Exercises `routes.vision` — a plain passthrough to
+`meta/llama-3.2-11b-vision-instruct` (NVIDIA NIM). Unlike `routes.smart-v2`,
+this is **not** picked by any classifier — none of the text targets or the
+smart-v2 judge were ever checked against image input, so this is a
+deliberately manual-switch model: you point at it yourself when you have an
+image or screenshot to hand it.
+
+Generates a small solid-red PNG in-script (no fixture file, no image-library
+dependency — just `python3`'s stdlib `zlib`), then checks two paths against
+the same target:
+
+| Check | Path | Proves |
+|---|---|---|
+| curl direct | raw HTTP to Switchyard's `/v1/chat/completions` with `model: "vision"` | the route/target wiring, and that the model actually reads image content |
+| `pi --no-tools` | `pi --no-tools --provider switchyard --model vision -p "..." @image.png` | the real user-facing path works, not just raw HTTP |
+
+### Run it
+
+```bash
+docker compose exec pi bash tests/test-vision-route.sh
+# or, for a fresh one-off container:
+docker compose run --rm pi bash tests/test-vision-route.sh
+```
+
+### Known limitation: `--no-tools` is required
+
+Calling `routes.vision` from a normal `pi` session (full tool-schema system
+prompt, tools enabled) fails with:
+
+```
+The number of image tokens (0) must be the same as the number of images (1)
+```
+
+This is NVIDIA's vLLM-hosted Llama-3.2-Vision (mllama architecture)
+miscounting image placeholder tokens once pi's large tool-schema system
+prompt is in the request — confirmed by the exact same image succeeding via
+plain curl (no tools involved) and failing only through `pi` with tools
+enabled. It's an upstream vLLM/mllama quirk, not a Switchyard routing bug or
+a config error: `--no-tools` shrinks the system prompt enough to avoid it,
+and you don't need tools to describe an image anyway. If this ever needs
+tools *and* vision in the same call, that's a real open problem, not
+something this route currently solves.
