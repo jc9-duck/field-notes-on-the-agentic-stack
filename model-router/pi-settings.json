@@ -12,6 +12,7 @@
   "extensions": [
     "/work/pi-extensions/ollama-provider.mjs",
     "/work/pi-extensions/switchyard-provider.mjs",
+    "/work/pi-extensions/vision-tools-guard.mjs",
     "/work/pi-extensions/failover-provider.mjs"
   ]
 }
