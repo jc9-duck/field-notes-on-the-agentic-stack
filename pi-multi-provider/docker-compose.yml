@@ -3,7 +3,12 @@ services:
     build: .
     working_dir: /work
     volumes:
-      - /Volumes/T7/pi/sandbox/pi-multi-provider:/work
+      # Relative, not a hardcoded absolute path: this folder now gets checked
+      # out into different locations (worktrees), and a hardcoded path here
+      # would silently keep mounting whatever the original checkout was,
+      # regardless of where this compose file is actually run from. Compose
+      # resolves relative paths against this file's own directory.
+      - .:/work
       # Mount your host AWS credentials read-only rather than duplicating
       # keys into env vars. AWS_PROFILE below selects which one to use.
       - ~/.aws:/root/.aws:ro
