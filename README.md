@@ -36,7 +36,28 @@ Runs on either Docker Desktop or [Colima](https://github.com/abiosoft/colima). I
 Colima and your project lives outside `$HOME` (e.g. an external drive), make sure that path
 is mounted: `colima start --mount /path/to/drive:w`.
 
+### [`agentgateway/`](agentgateway/)
+
+[agentgateway](https://agentgateway.dev/) multiplexing two example MCP servers behind
+one endpoint, with tool-level access control (the gateway exposes only `read` from a
+server that genuinely also implements `write`/`delete`) and JWT identity via AWS
+Cognito — built so other identity providers can be swapped in later via
+`identity-providers/` without touching the gateway config itself.
+
+Quickstart:
+```bash
+cd agentgateway
+cp .env.example .env   # fill in pi's provider keys
+./identity-providers/setup-cognito.sh   # provisions a Cognito User Pool, prints .env values
+docker compose build
+docker compose up -d math-server docs-server config-init agentgateway
+```
+
+See [`agentgateway/README.md`](agentgateway/README.md) for the full walkthrough
+(minting a test token, proving the gateway-vs-backend restriction, running pi against
+the gateway).
+
 ## What's coming
 
-MCP, agent gateways, observability, and more — each as its own subfolder here as the
-corresponding post gets written.
+MCP, observability, and more — each as its own subfolder here as the corresponding
+post gets written.

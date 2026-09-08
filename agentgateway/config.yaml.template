@@ -1,0 +1,82 @@
+# agentgateway config, rendered from this template by config-init/'s
+# envsubst step (see docker-compose.yml) into a real config.yaml before
+# agentgateway itself starts. The only provider-specific values anywhere in
+# this file are the three OIDC_ISSUER / OIDC_AUDIENCE / OIDC_JWKS_URI
+# placeholders below — everything else, including the CEL policy, is
+# identical no matter which identity provider is behind those three values.
+# That's the whole point of the modular identity design: swapping Cognito
+# for Okta/Entra ID later (see identity-providers/) means new .env values,
+# never an edit to this file.
+#
+# Careful editing this file: agentgateway itself does its own dollar-brace
+# interpolation pass over the rendered config.yaml (undocumented — found by
+# hitting the failure directly), and it scans the whole file, comments
+# included, not just live config values. Any dollar-brace-wrapped text left
+# in a comment (even just as a prose example of the syntax) crashes
+# agentgateway at startup with an "environment variable not found" error —
+# it is not silently ignored as a comment the way you'd expect. This
+# paragraph itself was rewritten once already after tripping over exactly
+# that. Refer to placeholder names in plain text (no dollar-brace wrapping)
+# anywhere in this file, comments included.
+mcp:
+  port: 4000
+  targets:
+    # No policy attached here on purpose — math-server proves multiplexing
+    # works with zero interesting config; docs-server (below) is where the
+    # actual access-control demo lives.
+    - name: math
+      mcp:
+        # Separate host/port/path, not a single host: "http://host:port/path"
+        # string — agentgateway's schema supports a bare-origin single
+        # string (e.g. "https://example.com", no path) *or* this three-field
+        # form; concatenating a path onto the single-string form parses
+        # unpredictably (confirmed: produced a baffling "Invalid Host:
+        # math-server" runtime error, not a config-validation error, so it
+        # silently passed schema checks and broke at request time instead).
+        host: math-server
+        port: 3001
+        path: /mcp
+    - name: docs
+      mcp:
+        host: docs-server
+        port: 3002
+        path: /mcp
+  policies:
+    # Rejects any request with no (or an invalid) bearer JWT. `mode: strict`
+    # is what makes the "no Authorization header -> rejected" acceptance
+    # criterion true; a looser `optional`/`permissive` mode would let
+    # unauthenticated calls through for testing, at the cost of that
+    # criterion not holding.
+    mcpAuthentication:
+      mode: strict
+      issuer: ${OIDC_ISSUER}
+      audiences:
+        - ${OIDC_AUDIENCE}
+      jwks:
+        url: ${OIDC_JWKS_URI}
+      resourceMetadata:
+        resource: http://localhost:4000/mcp
+        scopesSupported:
+          - read:tools
+        bearerMethodsSupported:
+          - header
+
+    # mcp.tool.target is what makes one policy block apply differently per
+    # backend within a single multiplexed endpoint: math stays fully open
+    # to any authenticated caller, docs is read-only by default, and
+    # write/delete on docs require a normalized `role` claim of "editor" —
+    # not a Cognito-specific claim name, so this block doesn't change when
+    # the identity provider behind OIDC_ISSUER/OIDC_AUDIENCE/OIDC_JWKS_URI
+    # changes.
+    #
+    # This is also the actual proof-of-concept for #22: write/delete are
+    # genuinely implemented by docs-server (see docs-server/index.mjs) and
+    # work when called directly against that container. It's this policy,
+    # not a missing backend capability, that keeps them out of reach here.
+    mcpAuthorization:
+      rules:
+        - allow: 'mcp.tool.target == "math"'
+        - allow: 'mcp.tool.target == "docs" && mcp.tool.name == "read"'
+        - allow: >
+            mcp.tool.target == "docs" && mcp.tool.name != "read" &&
+            has(jwt.role) && jwt.role == "editor"
