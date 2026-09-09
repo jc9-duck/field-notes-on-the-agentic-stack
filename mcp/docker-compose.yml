@@ -12,6 +12,15 @@ services:
       # Mount your host AWS credentials read-only rather than duplicating
       # keys into env vars. AWS_PROFILE below selects which one to use.
       - ~/.aws:/root/.aws:ro
+      # pi's Ctrl+V image paste writes the clipboard image to the host's
+      # temp dir and hands pi that absolute path. Without this, pi runs
+      # inside the container and that path doesn't exist there -- paste
+      # silently degrades to sending the path as plain text instead of an
+      # image (no error, just a model that "can't see" anything). Mounting
+      # $TMPDIR at the identical guest path makes the pasted file visible
+      # to the container under the exact path pi already has. Falls back to
+      # /tmp if $TMPDIR isn't exported in the shell running `docker compose`.
+      - ${TMPDIR:-/tmp}:${TMPDIR:-/tmp}:ro
     environment:
       - AWS_PROFILE=${AWS_PROFILE:-default}
       - AWS_REGION=${AWS_REGION:-us-east-1}
@@ -23,12 +32,57 @@ services:
       - NVIDIA_API_KEY=${NVIDIA_API_KEY:-}
       # Only needed if you're testing a non-Bedrock provider directly.
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      # OpenAI direct — last resort in the failover chain, in case AWS
+      # itself is having an outage (from platform.openai.com).
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       # GitHub CLI/git push auth. Export via `export GH_TOKEN=$(gh auth token)`
       # on the host before running compose — never hardcode it here. Using a
       # token instead of mounting host SSH keys or ~/.config/gh: the global
       # SSH config forces an unrelated identity for all github.com hosts, and
       # gh's token normally lives in the macOS Keychain, unreadable from Linux.
       - GH_TOKEN=${GH_TOKEN:-}
+    ports:
+      # Host-side ports shifted up from model-router/'s originals (4000/
+      # 4321/4100) so both projects' containers can run at the same time
+      # without a port collision — internal container ports are unchanged,
+      # only the host-facing mapping differs.
+      #
+      # Publish switchyard-server's port so you can `curl localhost:5000/...`
+      # from the Mac host directly, same as its own docs' verification steps.
+      - "5000:4000"
+      # trace-server.mjs — browse request history at localhost:5321.
+      - "5321:4321"
+      # failover-proxy.mjs — the actual entrypoint pi talks to by default.
+      - "5100:4100"
     stdin_open: true
     tty: true
     command: bash
+
+  # Scrapes switchyard-server's /metrics (Prometheus text, exposed by its
+  # own OpenTelemetry provider) from the pi container above. Reaches it via
+  # Compose's built-in DNS ("pi" service name), not the published host port.
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "127.0.0.1:9090:9090"
+    depends_on:
+      - pi
+
+  # Pre-provisioned (datasource + dashboard already loaded, anonymous
+  # Admin access) so there's no manual setup step — open
+  # http://localhost:3000 and the routing dashboard is just there.
+  grafana:
+    image: grafana/grafana:latest
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_AUTH_DISABLE_LOGIN_FORM=true
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      - prometheus

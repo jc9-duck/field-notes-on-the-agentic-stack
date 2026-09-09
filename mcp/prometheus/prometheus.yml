@@ -1,0 +1,10 @@
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  - job_name: switchyard
+    # "pi" resolves via Docker Compose's built-in DNS to the pi service's
+    # container — no host networking or extra config needed, since both
+    # containers share the same compose-managed network.
+    static_configs:
+      - targets: ["pi:4000"]

@@ -36,7 +36,25 @@ Runs on either Docker Desktop or [Colima](https://github.com/abiosoft/colima). I
 Colima and your project lives outside `$HOME` (e.g. an external drive), make sure that path
 is mounted: `colima start --mount /path/to/drive:w`.
 
+### [`mcp/`](mcp/)
+
+Wiring MCP (Model Context Protocol) servers into the same Pi setup: AWS's managed MCP
+server (reached via `mcp-proxy-for-aws`, since the self-hosted `awslabs.aws-api-mcp-server`
+is now superseded) and GitHub's hosted MCP server, both configured through `.mcp.json`. Also
+bakes in the GitHub CLI so `git push`/`gh` work from inside the container over HTTPS via a
+`GH_TOKEN`, rather than fighting the host's global SSH config or the macOS Keychain.
+
+Quickstart:
+```bash
+cd mcp
+cp .env.example .env   # fill in provider keys, plus GH_TOKEN for git push + the github MCP server
+docker compose build
+docker compose run --rm pi
+```
+
+Same Docker Desktop/Colima notes as `pi-multi-provider/` above.
+
 ## What's coming
 
-MCP, agent gateways, observability, and more — each as its own subfolder here as the
+Agent gateways, observability, and more — each as its own subfolder here as the
 corresponding post gets written.
