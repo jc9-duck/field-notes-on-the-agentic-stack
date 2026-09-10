@@ -20,24 +20,6 @@ services:
       # actually restricting access from the outside.
       - ./docs-server/sample-docs:/data/sample-docs
 
-  # Bridges the credentialed, SigV4-signed managed AWS MCP Server (the same
-  # one mcp/.mcp.json wires directly via stdio) onto plain HTTP so
-  # agentgateway -- distroless, can't spawn a stdio subprocess itself --
-  # can target it like any other backend. mcp-proxy (npm, baked into the
-  # image) spawns `uvx mcp-proxy-for-aws` as its stdio child and re-serves
-  # it as Streamable HTTP.
-  aws-managed-server:
-    build: ./aws-managed-server
-    environment:
-      # Real AWS credentials (SigV4), not just the Bedrock bearer token --
-      # mcp-proxy-for-aws needs the standard AWS SDK credential chain. Same
-      # AWS_PROFILE + mounted ~/.aws pattern every other folder in this
-      # repo already uses.
-      - AWS_PROFILE=${AWS_PROFILE:-default}
-      - AWS_REGION=${AWS_REGION:-us-east-1}
-    volumes:
-      - ~/.aws:/root/.aws:ro
-
   agentgateway:
     # Official distroless image, not built from source.
     image: cr.agentgateway.dev/agentgateway:v1.5.0
@@ -45,8 +27,6 @@ services:
       math-server:
         condition: service_started
       docs-server:
-        condition: service_started
-      aws-managed-server:
         condition: service_started
     volumes:
       # Plain static file, bind-mounted directly — no render step needed.
