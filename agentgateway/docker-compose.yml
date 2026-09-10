@@ -36,6 +36,13 @@ services:
       # render, so that machinery is gone too. Recoverable from git history
       # at commit aef38b5 when identity work resumes.)
       - ./config.yaml:/config/config.yaml:ro
+    environment:
+      # Resolved by agentgateway itself into config.yaml's `github` target
+      # backendAuth at startup (agentgateway does its own $VAR interpolation
+      # over the config file -- see config.yaml's comment). Same GH_TOKEN
+      # source as every other folder in this repo: `export GH_TOKEN=$(gh
+      # auth token)` on the host before `docker compose up`.
+      - GH_TOKEN=${GH_TOKEN:-}
     command: ["-f", "/config/config.yaml"]
     ports:
       # The one endpoint clients talk to — multiplexes math-server and

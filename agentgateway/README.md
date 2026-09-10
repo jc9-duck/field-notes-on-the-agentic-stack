@@ -1,15 +1,27 @@
 # agentgateway
 
 [agentgateway](https://agentgateway.dev/) (Linux Foundation, Rust, MCP multiplexer)
-sitting in front of two example MCP servers — proving it can (1) federate multiple
-backends behind one endpoint, and (2) restrict which tools a client sees per-backend,
-independent of what the backend actually implements.
+sitting in front of four MCP servers — two hand-built, two genuinely live/external —
+proving it can (1) federate multiple backends behind one endpoint, real third-party
+servers included, and (2) restrict which tools a client sees per-backend, independent
+of what the backend actually implements.
 
 - `math-server/` — arithmetic tools, no interesting policy. Pure multiplexing proof.
 - `docs-server/` — `read`/`write`/`delete` tools over a real bind-mounted folder
   (`docs-server/sample-docs/`). agentgateway restricts the gateway to `read` only;
   `write`/`delete` still work if you call `docs-server` directly, proving the
   restriction is gateway-enforced, not backend-enforced.
+- `github` — GitHub's hosted MCP server (`api.githubcopilot.com/mcp/`), live and
+  credentialed via `GH_TOKEN`. agentgateway injects the Authorization header itself
+  (`policies.backendAuth` on the target, resolved from the gateway container's own env)
+  — the client (`pi`, or you via curl) never handles that token at all.
+- `aws-knowledge` — AWS's public Knowledge MCP Server
+  (`knowledge-mcp.global.api.aws`), live and genuinely credential-free — no token, no
+  signup, matching this series' zero-cost bar. (Distinct from the SigV4-signed, managed
+  `aws-mcp.us-east-1.api.aws` server `mcp/` used to wire directly — that one needs its
+  own signing proxy as a sidecar to become an agentgateway target, since agentgateway's
+  distroless image can't spawn `uvx mcp-proxy-for-aws` as a subprocess. Not pursued here
+  since a public, zero-credential server is a strictly simpler second live target.)
 - `config.yaml` — agentgateway's config (plain static file, no identity/JWT
   requirement right now — see "Identity" below).
 
@@ -26,7 +38,8 @@ below still holds without any token.
 
 ```bash
 cd agentgateway
-cp .env.example .env   # fill in pi's provider keys
+cp .env.example .env   # fill in pi's provider keys, plus GH_TOKEN for the live github target
+export GH_TOKEN=$(gh auth token)   # or set it in .env directly
 docker compose build
 docker compose up -d math-server docs-server agentgateway
 ```
@@ -86,6 +99,23 @@ Then run pi against the same gateway:
 
 ```bash
 docker compose run --rm pi
+```
+
+### Proving the live external servers
+
+Same session as above (`tools/list` now returns 54 tools total: 4 math + 1 docs +
+~45 github + 5 aws-knowledge — GitHub's own tool count varies with the token's scopes).
+
+```bash
+# Real GitHub profile data, via agentgateway's injected token -- pi never sees GH_TOKEN
+curl -s http://localhost:4000/mcp -H "mcp-session-id: $SESSION" \
+  -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"github_get_me","arguments":{}}}'
+
+# Real AWS documentation search, no credentials anywhere in the request
+curl -s http://localhost:4000/mcp -H "mcp-session-id: $SESSION" \
+  -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"aws-knowledge_aws___search_documentation","arguments":{"search_phrase":"S3 bucket versioning"}}}'
 ```
 
 ## Identity (coming back later, as its own step)

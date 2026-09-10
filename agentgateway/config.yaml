@@ -29,6 +29,40 @@ mcp:
         host: docs-server
         port: 3002
         path: /mcp
+    # Two genuinely live, external MCP servers multiplexed alongside the
+    # two hand-built ones above -- proving agentgateway federates real
+    # third-party servers exactly the same way it federates ones this repo
+    # wrote. Unlike math-server/docs-server, external HTTPS targets use a
+    # single "host: <full URL incl. path>" string (agentgateway's schema
+    # doc example for an external target does this directly, e.g.
+    # `host: https://mcp.atlassian.com/v1/mcp`) -- different from the
+    # internal host/port/path split above, which is required specifically
+    # for bare compose-network hostnames with no scheme.
+    - name: github
+      mcp:
+        host: https://api.githubcopilot.com/mcp/
+      # backendAuth injects a static Authorization header agentgateway
+      # resolves from its own container's env at startup (the same
+      # dollar-brace interpolation mechanism that bit the identity work
+      # earlier -- here it's the intended use, not a gotcha). GH_TOKEN is
+      # set on the `agentgateway` service in docker-compose.yml.
+      policies:
+        backendAuth:
+          key: "$GH_TOKEN"
+    - name: aws-knowledge
+      mcp:
+        # AWS Knowledge MCP Server -- a fully managed, public remote
+        # server. Documentation search/skill discovery need zero AWS
+        # credentials (confirmed live: HTTP 200 on a bare `initialize`
+        # call, no auth header at all) -- genuinely free, no signup,
+        # matching this series' "zero dollars, no gymnastics" bar. Distinct
+        # from the credentialed, SigV4-signed aws-mcp.us-east-1.api.aws
+        # server mcp/ used to wire directly (mcp-proxy-for-aws) -- that one
+        # can't become an agentgateway target without a sidecar to do the
+        # SigV4 signing, since agentgateway's distroless image can't spawn
+        # `uvx` as a stdio subprocess. Not pursued here since this public,
+        # zero-credential server is a strictly simpler second live target.
+        host: https://knowledge-mcp.global.api.aws
   policies:
     # mcp.tool.target is what makes one policy block apply differently per
     # backend within a single multiplexed endpoint: math stays fully open,
@@ -47,3 +81,5 @@ mcp:
       rules:
         - allow: 'mcp.tool.target == "math"'
         - allow: 'mcp.tool.target == "docs" && mcp.tool.name == "read"'
+        - allow: 'mcp.tool.target == "github"'
+        - allow: 'mcp.tool.target == "aws-knowledge"'
