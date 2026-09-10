@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "gateway": {
+      "type": "http",
+      "url": "http://agentgateway:4000/mcp"
+    }
+  }
+}

@@ -1,0 +1,111 @@
+# agentgateway config. Plain static file, not a template — the only reason
+# a rendered template + config-init sidecar existed before was to inject
+# OIDC_ISSUER/OIDC_AUDIENCE/OIDC_JWKS_URI for JWT auth. Identity is
+# deliberately deferred (see agentgateway/README.md and the follow-up
+# "JWT identity via AWS Cognito" issue) — no variables left to render, so
+# no template machinery either. When identity comes back as its own step,
+# the template + config-init pattern is recoverable from git history
+# (commit aef38b5).
+mcp:
+  port: 4000
+  targets:
+    # No policy attached here on purpose — math-server proves multiplexing
+    # works with zero interesting config; docs-server (below) is where the
+    # actual access-control demo lives.
+    - name: math
+      mcp:
+        # Separate host/port/path, not a single host: "http://host:port/path"
+        # string — agentgateway's schema supports a bare-origin single
+        # string (e.g. "https://example.com", no path) *or* this three-field
+        # form; concatenating a path onto the single-string form parses
+        # unpredictably (confirmed: produced a baffling "Invalid Host:
+        # math-server" runtime error, not a config-validation error, so it
+        # silently passed schema checks and broke at request time instead).
+        host: math-server
+        port: 3001
+        path: /mcp
+    - name: docs
+      mcp:
+        host: docs-server
+        port: 3002
+        path: /mcp
+    # Two genuinely live, external MCP servers multiplexed alongside the
+    # two hand-built ones above -- proving agentgateway federates real
+    # third-party servers exactly the same way it federates ones this repo
+    # wrote. Unlike math-server/docs-server, external HTTPS targets use a
+    # single "host: <full URL incl. path>" string (agentgateway's schema
+    # doc example for an external target does this directly, e.g.
+    # `host: https://mcp.atlassian.com/v1/mcp`) -- different from the
+    # internal host/port/path split above, which is required specifically
+    # for bare compose-network hostnames with no scheme.
+    - name: github
+      mcp:
+        host: https://api.githubcopilot.com/mcp/
+      # backendAuth injects a static Authorization header agentgateway
+      # resolves from its own container's env at startup (the same
+      # dollar-brace interpolation mechanism that bit the identity work
+      # earlier -- here it's the intended use, not a gotcha). GH_TOKEN is
+      # set on the `agentgateway` service in docker-compose.yml.
+      policies:
+        backendAuth:
+          key: "$GH_TOKEN"
+    - name: aws-knowledge
+      mcp:
+        # AWS Knowledge MCP Server -- a fully managed, public remote
+        # server. Documentation search/skill discovery need zero AWS
+        # credentials (confirmed live: HTTP 200 on a bare `initialize`
+        # call, no auth header at all) -- genuinely free, no signup,
+        # matching this series' "zero dollars, no gymnastics" bar. Distinct
+        # from the credentialed, SigV4-signed aws-mcp.us-east-1.api.aws
+        # server mcp/ used to wire directly (mcp-proxy-for-aws) -- that one
+        # can't become an agentgateway target without a sidecar to do the
+        # SigV4 signing, since agentgateway's distroless image can't spawn
+        # `uvx` as a stdio subprocess. Not pursued here since this public,
+        # zero-credential server is a strictly simpler second live target.
+        host: https://knowledge-mcp.global.api.aws
+        # The credentialed counterpart (real AWS account access via the
+        # same managed server mcp/.mcp.json wires directly as stdio,
+        # SigV4-signed) was built and evaluated but deliberately left out
+        # of this iteration -- no target here should require any auth at
+        # all, AWS included. It's not lost: the bridge sidecar and config
+        # are intact in git history (this branch, before the removal commit)
+        # for whenever a credentialed-backend step is deliberately taken as
+        # its own documented iteration, same treatment as identity above.
+    # Two more genuinely free, no-signup public servers, same bar as
+    # aws-knowledge above.
+    - name: deepwiki
+      mcp:
+        # DeepWiki (Devin/Cognition) -- AI-generated Q&A over public GitHub
+        # repos. Confirmed live, zero auth: a bare `initialize` call
+        # returns HTTP 200 with no Authorization header at all.
+        host: https://mcp.deepwiki.com/mcp
+    - name: context7
+      mcp:
+        # Context7 (Upstash) -- up-to-date library/framework documentation.
+        # Confirmed live with no API key (basic rate limits apply without
+        # one; a free key from context7.com/dashboard raises them, but
+        # isn't required -- matches the same "no signup needed" bar as
+        # aws-knowledge/deepwiki above, so no backendAuth key configured).
+        host: https://mcp.context7.com/mcp
+  policies:
+    # mcp.tool.target is what makes one policy block apply differently per
+    # backend within a single multiplexed endpoint: math stays fully open,
+    # docs is read-only. No JWT/identity requirement right now (deliberately
+    # deferred — see README) — write/delete on docs are unconditionally
+    # withheld by the gateway rather than role-gated, until identity comes
+    # back as its own step. The original role-gated version
+    # (`has(jwt.role) && jwt.role == "editor"`) is in git history at
+    # commit aef38b5 and in the follow-up identity issue, ready to restore.
+    #
+    # This is also the actual proof-of-concept for #22: write/delete are
+    # genuinely implemented by docs-server (see docs-server/index.mjs) and
+    # work when called directly against that container. It's this policy,
+    # not a missing backend capability, that keeps them out of reach here.
+    mcpAuthorization:
+      rules:
+        - allow: 'mcp.tool.target == "math"'
+        - allow: 'mcp.tool.target == "docs" && mcp.tool.name == "read"'
+        - allow: 'mcp.tool.target == "github"'
+        - allow: 'mcp.tool.target == "aws-knowledge"'
+        - allow: 'mcp.tool.target == "deepwiki"'
+        - allow: 'mcp.tool.target == "context7"'

@@ -471,3 +471,94 @@ sequenceDiagram
   `ANTHROPIC_API_KEY` values get added later (direct clients, bypassing Bedrock's access-grant
   question entirely) — not pursued this round since Devstral already closed the gap without
   new keys.
+
+## v6 — 2026-09-01 — Manual-switch vision route (screenshot/image analysis)
+
+Every route so far — `routes.smart`, `routes.smart-v2`, the passthrough routes — only ever
+handles text. Pasting a screenshot into `pi` silently went nowhere: the request would forward
+to whichever text model was selected and either get ignored or upstream-error, depending on
+the model. The ask this version answers: give `pi` a model you can manually switch to that
+actually reads images, without asking the classifier to guess at it.
+
+**Deliberately not wired into `routes.smart-v2`.** None of the existing targets or the
+smart-v2 judge were ever checked against image input — teaching the classifier to route images
+too would mean re-validating the judge's behavior on multimodal content, a bigger change than
+this ask needed. Instead: `targets.vision` + a plain `routes.vision` passthrough, same shape as
+`routes.local`/`routes.cloud`, picked explicitly by name.
+
+**Three-part fix, not just config** — config alone would have shipped a route `pi` still
+couldn't use cleanly from its actual model picker:
+1. `routes.toml`: `targets.vision` → `meta/llama-3.2-11b-vision-instruct` (NVIDIA NIM, same
+   `nvidia` client and `NVIDIA_API_KEY` every other NVIDIA target already uses — no new key),
+   plus `routes.vision` as a plain passthrough.
+2. `pi-extensions/switchyard-provider.mjs` hardcoded `input: ["text"]` on every route it
+   registered with `pi`, regardless of what the underlying model actually supports. Even with
+   the route correctly wired in `routes.toml`, `pi` itself wouldn't offer to attach an image to
+   *any* Switchyard model until this was fixed — this, not `routes.toml`, was the real reason
+   images "didn't work." Fixed with an `IMAGE_CAPABLE_ROUTE_IDS` set, currently just `{"vision"}`.
+3. `pi-extensions/vision-tools-guard.mjs` (new): the ask was specifically to switch to the
+   vision model *from inside `pi`'s `/model` picker*, not just via CLI flags — and doing that
+   walks straight into the tool-schema bug described below, since a normal interactive session
+   has tools on by default. This extension listens for pi's `model_select` event and calls
+   `pi.setActiveTools([])` while `switchyard/vision` is active, restoring the previous tool set
+   on switching away — the same fix `--no-tools` gives manually, automatic for the picker-driven
+   flow.
+
+**Catalog check, same pattern as v5's coding-model hunt** — confirmed by curling NVIDIA
+directly, not assumed from the listing: `meta/llama-3.2-11b-vision-instruct` and
+`-90b-vision-instruct` are genuinely deployed (`200`, correctly read a real test image).
+`microsoft/phi-3-vision-128k-instruct`, `nvidia/vila`, and `nvidia/neva-22b` — all also listed
+in NVIDIA's `/v1/models` — are phantom listings, `404 "Function ... Not found for account"`.
+Picked 11b over 90b: already fully verified this round; 90b is untested but on the table later
+if 11b proves too coarse on dense screenshots.
+
+**Real upstream gotcha, not a config bug**: calling `routes.vision` from a normal `pi` session
+(tools enabled, full tool-schema system prompt) fails with:
+
+```
+The number of image tokens (0) must be the same as the number of images (1)
+```
+
+NVIDIA's vLLM-hosted Llama-3.2-Vision (mllama architecture) miscounts image placeholder tokens
+once pi's large tool-schema system prompt is in the request. Confirmed by isolating the
+variable: the exact same image succeeds via plain curl through Switchyard (no tools involved)
+and fails only when sent through `pi` with tools enabled. `--no-tools` shrinks the system
+prompt enough to avoid it manually on the CLI — and you don't need tools to describe an image
+anyway:
+
+```bash
+pi --no-tools --provider switchyard --model vision -p "describe this" @screenshot.png
+```
+
+For the day-to-day flow — `/model` (or Ctrl+P cycling) mid-session — `vision-tools-guard.mjs`
+does this automatically: pick `switchyard/vision` from the picker, paste an image with Ctrl+V,
+no flags needed. (CLI `--provider`/`--model` at startup never fires `model_select`, so that path
+still needs `--no-tools` yourself — the guard only fires on an in-session switch.)
+
+**Tested three ways** (`tests/test-vision-route.sh`, `tests/README.md`): a direct curl through
+Switchyard's passthrough (proves the route/target wiring), the `pi --no-tools` CLI path (proves
+the manual escape hatch), and an RPC `set_model` switch — the same mechanism as `/model` — with
+tools left on (proves the guard extension actually saves you from the bug, not just the CLI
+flag). All three generate a small solid-red PNG in-script and check the model correctly names
+the color:
+
+| Check | Path | Result |
+|---|---|---|
+| curl direct | `POST /v1/chat/completions {model: "vision"}` | `meta/llama-3.2-11b-vision-instruct` correctly answered "Red." |
+| `pi --no-tools` | `pi --no-tools --provider switchyard --model vision -p "..." @image.png` | correctly answered "Red." |
+| `set_model` (RPC, tools on) | switch to `switchyard/vision` mid-session, then prompt with an image | guard's notification fired, model correctly answered "Red." |
+
+### Known-good state at this version
+- `routes.vision` confirmed genuinely image-capable via raw HTTP, via the `pi --no-tools` CLI
+  path, and via the `/model`-picker path with `vision-tools-guard.mjs` handling the upstream
+  mllama/vLLM quirk automatically — all three tested, not assumed.
+- Every prior route (`routes.smart`, `routes.smart-v2`, passthroughs) untouched and still live.
+- `switchyard-provider.mjs`'s `input` field is now per-route-accurate instead of a blanket
+  `["text"]` — a latent bug (nothing could ever have used image input through `pi`, even a
+  correctly-configured vision target) fixed as a side effect of this change.
+- **Deliberately deferred, not broken:** `meta/llama-3.2-90b-vision-instruct` as a second,
+  more-capable vision option — real and confirmed listed, just not exercised this round since
+  11b already closed the gap. Also deferred: tools + vision in the same call — the guard is
+  a real workaround for "describe an image," not a fix for a hypothetical "read this screenshot
+  and then edit a file based on it" flow, which would need pi's tool-schema prompt trimmed some
+  other way if it ever comes up.
