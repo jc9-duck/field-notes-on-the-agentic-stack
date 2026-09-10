@@ -63,6 +63,57 @@ mcp:
         # `uvx` as a stdio subprocess. Not pursued here since this public,
         # zero-credential server is a strictly simpler second live target.
         host: https://knowledge-mcp.global.api.aws
+    - name: aws-managed
+      mcp:
+        # The credentialed counterpart to aws-knowledge above: real AWS
+        # account access (15,000+ APIs) via the same managed server
+        # mcp/.mcp.json wires directly as a stdio subprocess
+        # (mcp-proxy-for-aws, SigV4-signed). agentgateway's distroless
+        # image can't spawn that subprocess itself, so aws-managed-server/
+        # (its own Dockerfile, its own docker-compose.yml service) bridges
+        # it: mcp-proxy (npm) spawns `uvx mcp-proxy-for-aws` as a stdio
+        # child and re-serves it as Streamable HTTP, giving agentgateway a
+        # normal HTTP target -- same host/port/path form as math/docs
+        # above, not the single-string form external HTTPS targets use,
+        # since this is another compose-network hostname with no scheme.
+        host: aws-managed-server
+        port: 3004
+        path: /mcp
+        # IMPORTANT, confirmed live: agentgateway's simplified `mcp` mode
+        # appears to eagerly reach every configured target as part of a
+        # client's own `initialize` handshake -- if this target can't
+        # authenticate (no active `aws sso login` session, or no AWS
+        # credentials mounted at all), the entire gateway's `initialize`
+        # call fails with a DNS-resolution-style error, taking down math/
+        # docs/github/aws-knowledge/deepwiki/context7 too, not just this
+        # target. This is NOT graceful per-target degradation. Before
+        # relying on this target, run `aws sso login --profile
+        # <your-profile>` (or otherwise ensure ~/.aws has valid, unexpired
+        # credentials) on the host first -- confirmed via aws-managed-
+        # server's own logs: it gets past "profile not found" once
+        # AWS_PROFILE is set correctly, then fails at
+        # UnauthorizedSSOTokenError if that profile's SSO session has
+        # expired, and either failure mode takes the whole gateway down
+        # with it. If you don't have AWS access to test with, comment this
+        # target block out entirely rather than leaving it configured but
+        # broken -- the rest of the stack (math/docs/github/aws-knowledge/
+        # deepwiki/context7) works completely independently of this one.
+    # Two more genuinely free, no-signup public servers, same bar as
+    # aws-knowledge above.
+    - name: deepwiki
+      mcp:
+        # DeepWiki (Devin/Cognition) -- AI-generated Q&A over public GitHub
+        # repos. Confirmed live, zero auth: a bare `initialize` call
+        # returns HTTP 200 with no Authorization header at all.
+        host: https://mcp.deepwiki.com/mcp
+    - name: context7
+      mcp:
+        # Context7 (Upstash) -- up-to-date library/framework documentation.
+        # Confirmed live with no API key (basic rate limits apply without
+        # one; a free key from context7.com/dashboard raises them, but
+        # isn't required -- matches the same "no signup needed" bar as
+        # aws-knowledge/deepwiki above, so no backendAuth key configured).
+        host: https://mcp.context7.com/mcp
   policies:
     # mcp.tool.target is what makes one policy block apply differently per
     # backend within a single multiplexed endpoint: math stays fully open,
@@ -83,3 +134,6 @@ mcp:
         - allow: 'mcp.tool.target == "docs" && mcp.tool.name == "read"'
         - allow: 'mcp.tool.target == "github"'
         - allow: 'mcp.tool.target == "aws-knowledge"'
+        - allow: 'mcp.tool.target == "aws-managed"'
+        - allow: 'mcp.tool.target == "deepwiki"'
+        - allow: 'mcp.tool.target == "context7"'

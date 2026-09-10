@@ -1,10 +1,13 @@
 # agentgateway
 
-[agentgateway](https://agentgateway.dev/) (Linux Foundation, Rust, MCP multiplexer)
-sitting in front of four MCP servers — two hand-built, two genuinely live/external —
-proving it can (1) federate multiple backends behind one endpoint, real third-party
-servers included, and (2) restrict which tools a client sees per-backend, independent
-of what the backend actually implements.
+**Iteration 1 of a staged build.** This folder is built up step by step, each step its
+own commit and its own documented/demoed piece, rather than shipped fully-wired upfront
+— see "What's still coming" at the bottom. Right now: [agentgateway](https://agentgateway.dev/)
+(Linux Foundation, Rust, MCP multiplexer) sitting in front of seven MCP servers — two
+hand-built, five genuinely live/external — proving it can (1) federate multiple
+backends behind one endpoint, real third-party servers included, and (2) restrict which
+tools a client sees per-backend, independent of what the backend actually implements.
+No identity, no guardrails, no request tracing yet — those are later steps.
 
 - `math-server/` — arithmetic tools, no interesting policy. Pure multiplexing proof.
 - `docs-server/` — `read`/`write`/`delete` tools over a real bind-mounted folder
@@ -17,11 +20,22 @@ of what the backend actually implements.
   — the client (`pi`, or you via curl) never handles that token at all.
 - `aws-knowledge` — AWS's public Knowledge MCP Server
   (`knowledge-mcp.global.api.aws`), live and genuinely credential-free — no token, no
-  signup, matching this series' zero-cost bar. (Distinct from the SigV4-signed, managed
-  `aws-mcp.us-east-1.api.aws` server `mcp/` used to wire directly — that one needs its
-  own signing proxy as a sidecar to become an agentgateway target, since agentgateway's
-  distroless image can't spawn `uvx mcp-proxy-for-aws` as a subprocess. Not pursued here
-  since a public, zero-credential server is a strictly simpler second live target.)
+  signup, matching this series' zero-cost bar.
+- `aws-managed` — the credentialed counterpart: the same managed, SigV4-signed
+  `aws-mcp.us-east-1.api.aws` server `mcp/` wires directly as a stdio subprocess
+  (`mcp-proxy-for-aws`), real AWS account access, 15,000+ APIs. agentgateway's
+  distroless image can't spawn that subprocess itself, so `aws-managed-server/` (its
+  own Dockerfile, own compose service) bridges it: the `mcp-proxy` npm package spawns
+  `uvx mcp-proxy-for-aws` as its stdio child and re-serves it as Streamable HTTP.
+  **Read the warning in `config.yaml` next to this target before relying on it** — if
+  it can't authenticate (no active `aws sso login` session), it takes the *entire*
+  gateway down, not just this one target's tools. Comment the target out if you don't
+  have AWS access to test with.
+- `deepwiki` — DeepWiki's public MCP server (`mcp.deepwiki.com`), AI-generated Q&A over
+  any public GitHub repo, genuinely credential-free.
+- `context7` — Context7's public MCP server (`mcp.context7.com`), up-to-date
+  library/framework documentation, usable with no API key (a free key from
+  `context7.com/dashboard` only raises rate limits, never required).
 - `config.yaml` — agentgateway's config (plain static file, no identity/JWT
   requirement right now — see "Identity" below).
 
@@ -103,8 +117,11 @@ docker compose run --rm pi
 
 ### Proving the live external servers
 
-Same session as above (`tools/list` now returns 54 tools total: 4 math + 1 docs +
-~45 github + 5 aws-knowledge — GitHub's own tool count varies with the token's scopes).
+Same session as above. With `aws-managed` commented out (see its warning in
+`config.yaml` — it needs a real, currently-authenticated AWS SSO session or it takes
+the whole gateway down), `tools/list` returns 59 tools: 4 math + 1 docs + ~45 github +
+5 aws-knowledge + 3 deepwiki + 2 context7 (GitHub's own count varies with the token's
+scopes).
 
 ```bash
 # Real GitHub profile data, via agentgateway's injected token -- pi never sees GH_TOKEN
@@ -116,15 +133,39 @@ curl -s http://localhost:4000/mcp -H "mcp-session-id: $SESSION" \
 curl -s http://localhost:4000/mcp -H "mcp-session-id: $SESSION" \
   -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
   -d '{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"aws-knowledge_aws___search_documentation","arguments":{"search_phrase":"S3 bucket versioning"}}}'
+
+# Real repo documentation structure from DeepWiki, no credentials
+curl -s http://localhost:4000/mcp -H "mcp-session-id: $SESSION" \
+  -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"deepwiki_read_wiki_structure","arguments":{"repoName":"facebook/react"}}}'
+
+# Real library docs lookup from Context7, no API key
+curl -s http://localhost:4000/mcp -H "mcp-session-id: $SESSION" \
+  -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"context7_resolve-library-id","arguments":{"query":"react hooks","libraryName":"react"}}}'
 ```
 
-## Identity (coming back later, as its own step)
+To also test `aws-managed`: uncomment its target block in `config.yaml`, run
+`aws sso login --profile <your-profile>` on the host first, then `docker compose up -d
+aws-managed-server agentgateway`. If that SSO session is expired or missing, the whole
+gateway's `initialize` call fails outright — confirmed live, not a hypothetical; see
+the target's own comment in `config.yaml` for the exact error progression.
 
-The original design (already spec'd, not re-derived from scratch when picked back up):
-JWT auth via `mcpAuthentication`, provider-agnostic through three env vars
-(`OIDC_ISSUER`/`OIDC_AUDIENCE`/`OIDC_JWKS_URI`) rendered into `config.yaml` by a small
-`config-init` sidecar (agentgateway's official image is distroless, no `envsubst`
-available inside it), with a normalized `role` JWT claim so the CEL policy never
-references a specific identity provider by name. AWS Cognito first (a `setup-cognito.sh`
-script provisions a real User Pool + role-claim Lambda trigger), Okta/Entra ID as
-later, separate steps. See the follow-up GitHub issue for the full spec.
+## What's still coming
+
+Each of these lands as its own step — its own commit, its own README update, its own
+verified demo — not bundled into one pass:
+
+- **Identity.** The original design (already spec'd, not re-derived from scratch when
+  picked back up): JWT auth via `mcpAuthentication`, provider-agnostic through three
+  env vars (`OIDC_ISSUER`/`OIDC_AUDIENCE`/`OIDC_JWKS_URI`) rendered into `config.yaml`
+  by a small `config-init` sidecar (agentgateway's official image is distroless, no
+  `envsubst` available inside it), with a normalized `role` JWT claim so the CEL policy
+  never references a specific identity provider by name. AWS Cognito first (a
+  `setup-cognito.sh` script provisions a real User Pool + role-claim Lambda trigger),
+  Okta/Entra ID as later, separate steps. See the follow-up GitHub issue for the full
+  spec.
+- **Guardrails** — regex-based `promptGuard` first, then an LLM-based guardrail via
+  NVIDIA NeMo Guardrails as a custom webhook.
+- **Sequence-diagram request tracing**, the same `trace-server.mjs`-style viewer
+  `model-router/` already has, adapted to agentgateway's own request/policy logging.
