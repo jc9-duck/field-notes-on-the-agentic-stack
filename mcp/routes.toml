@@ -96,6 +96,15 @@ llm_client = "nvidia"
 id = "mistral.devstral-2-123b"
 llm_client = "bedrock"
 
+[targets.qwen-coder]
+# Second coding specialist, alongside targets.coding (Devstral): Qwen3-Coder-Next,
+# already confirmed working on this account per the comment above -- added as its
+# own target so the failover chain can reach it directly, not just as a mention.
+# 77.2% vs Devstral's 72.2% on SWE-bench Verified, at a comparable Bedrock price
+# ($0.50/M vs $0.40/M input) -- the better default coding fallback.
+id = "qwen.qwen3-coder-next"
+llm_client = "bedrock"
+
 [targets.vision]
 # Manual-switch image target — none of the routes above accept images: the
 # smart-v2 judge and every text target it can pick were never checked against
@@ -255,6 +264,11 @@ target = "vision"
 id = "local-big"
 type = "passthrough"
 target = "local-big"
+
+[routes.qwen-coder]
+id = "qwen-coder"
+type = "passthrough"
+target = "qwen-coder"
 
 [routes.bedrock-gptoss]
 id = "bedrock-gptoss"

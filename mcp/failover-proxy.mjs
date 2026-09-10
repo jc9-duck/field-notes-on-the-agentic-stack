@@ -27,8 +27,14 @@ const FAILOVER_LOG = "/work/failover.jsonl";
 // (see routes.toml). "openai-gpt51" isn't here either — no real
 // OPENAI_API_KEY in .env yet, and routes.toml doesn't define that route
 // for the same reason. Add it back once there's a real key.
+// qwen-coder (Qwen3-Coder-Next) inserted right after switchyard's own
+// classifier attempt: 77.2% vs Devstral's 72.2% on SWE-bench Verified, at a
+// comparable Bedrock price ($0.50/M vs $0.40/M input) -- the better default
+// coding fallback once switchyard's own pick fails. Same preference applied
+// in pi-dev's chain.
 const CHAIN = [
   "switchyard",
+  "qwen-coder",
   "local-big",
   "bedrock-gptoss",
   "bedrock-glm",
