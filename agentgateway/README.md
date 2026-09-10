@@ -10,27 +10,25 @@ independent of what the backend actually implements.
   (`docs-server/sample-docs/`). agentgateway restricts the gateway to `read` only;
   `write`/`delete` still work if you call `docs-server` directly, proving the
   restriction is gateway-enforced, not backend-enforced.
-- `config.yaml.template` — agentgateway's config, rendered by `config-init/` via
-  `envsubst` at container start. The only provider-specific values anywhere in it are
-  `${OIDC_ISSUER}`/`${OIDC_AUDIENCE}`/`${OIDC_JWKS_URI}` — everything else, including the
-  CEL tool-authorization policy, is identity-provider-agnostic.
-- `identity-providers/` — one file per IdP. `cognito.env.example` (+ `setup-cognito.sh`)
-  is filled in; `okta.env.example`/`entra.env.example` are stubs for later.
+- `config.yaml` — agentgateway's config (plain static file, no identity/JWT
+  requirement right now — see "Identity" below).
+
+**Identity/JWT auth is deliberately not wired in yet.** An earlier pass built full
+AWS Cognito-backed JWT auth (provider-agnostic, swappable identity providers) for this
+folder; it's being reintroduced deliberately, step by step, with its own documentation
+and demo, rather than baked in upfront. The original implementation is intact in git
+history (commit `aef38b5`) and re-specified in its own follow-up issue — nothing was
+lost, just deferred. Right now, `mcpAuthorization`'s tool-restriction policy applies to
+every caller unconditionally (no "editor" escape hatch), so the gateway-vs-backend demo
+below still holds without any token.
 
 ## Quickstart
 
 ```bash
 cd agentgateway
 cp .env.example .env   # fill in pi's provider keys
-
-# Provision the identity provider (creates real, persistent AWS resources —
-# read the script before running it):
-export COGNITO_TEST_PASSWORD='<a password meeting Cognito's default policy>'
-./identity-providers/setup-cognito.sh
-# copy the printed OIDC_ISSUER / OIDC_AUDIENCE / OIDC_JWKS_URI into .env
-
 docker compose build
-docker compose up -d math-server docs-server config-init agentgateway
+docker compose up -d math-server docs-server agentgateway
 ```
 
 Runs on either Docker Desktop or [Colima](https://github.com/abiosoft/colima). If you're
@@ -46,43 +44,33 @@ stateless HTTP servers): every call after `initialize` needs the `mcp-session-id
 header it returns.
 
 ```bash
-# No Authorization header at all -> rejected outright, no session even attempted
-curl -s -o /dev/null -w '%{http_code}\n' http://localhost:4000/mcp \
-  -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":0,"method":"tools/list"}'
-# -> 401
-
-# Mint a bearer token (see setup-cognito.sh's own printed output for the
-# exact command using your test user; a "viewer" role account has no
-# custom:role=editor attribute)
-export TOKEN='<ID token from admin-initiate-auth>'
-
 # initialize establishes the gateway's own session (separate from anything
-# docs-server/math-server track themselves)
-SESSION=$(curl -sD - -o /dev/null http://localhost:4000/mcp -H "Authorization: Bearer $TOKEN" \
+# docs-server/math-server track themselves) -- no auth needed right now.
+SESSION=$(curl -sD - -o /dev/null http://localhost:4000/mcp \
   -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"demo","version":"1.0"}}}' \
   | grep -i mcp-session-id | awk '{print $2}' | tr -d '\r')
 
-# tools/list through the gateway shows both backends' tools in one response —
-# for a non-editor token, docs_write/docs_delete are absent entirely (not
-# just denied), since the CEL policy filters tools/list too:
-curl -s http://localhost:4000/mcp -H "Authorization: Bearer $TOKEN" -H "mcp-session-id: $SESSION" \
+# tools/list through the gateway shows both backends' tools in one response --
+# docs_write/docs_delete are absent entirely (not just denied), since the
+# CEL policy filters tools/list too:
+curl -s http://localhost:4000/mcp -H "mcp-session-id: $SESSION" \
   -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
 
 # read on docs succeeds through the gateway
-curl -s http://localhost:4000/mcp -H "Authorization: Bearer $TOKEN" -H "mcp-session-id: $SESSION" \
+curl -s http://localhost:4000/mcp -H "mcp-session-id: $SESSION" \
   -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
   -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"docs_read","arguments":{}}}'
 
-# delete on docs, through the gateway, as a non-editor -> "Unknown tool: docs_delete"
+# delete on docs, through the gateway -> "Unknown tool: docs_delete"
 # (the policy hides it, rather than a generic permission-denied)
-curl -s http://localhost:4000/mcp -H "Authorization: Bearer $TOKEN" -H "mcp-session-id: $SESSION" \
+curl -s http://localhost:4000/mcp -H "mcp-session-id: $SESSION" \
   -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
   -d '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"docs_delete","arguments":{"filename":"changelog.md"}}}'
 
 # ...but delete genuinely works when called directly against docs-server,
-# bypassing the gateway entirely (no auth needed — docs-server has none of
+# bypassing the gateway entirely (no auth needed -- docs-server has none of
 # its own; the gateway is the only thing gating access here):
 docker compose exec -T docs-server node -e "
   const http = require('node:http');
@@ -94,19 +82,19 @@ docker compose exec -T docs-server node -e "
 "
 ```
 
-An "editor" token (from a test user with `custom:role=editor`) gets `docs_write` and
-`docs_delete` in its own `tools/list` and can actually call them through the gateway —
-same requests, different token, different tool visibility.
-
 Then run pi against the same gateway:
 
 ```bash
-export AGENTGATEWAY_TOKEN="$TOKEN"
 docker compose run --rm pi
 ```
 
-## Swapping identity providers later
+## Identity (coming back later, as its own step)
 
-Only `identity-providers/<provider>.env.example`'s values change. `config.yaml.template`
-and the CEL policy in `docker-compose.yml`'s `config-init` service never reference
-Cognito by name — see that file's own comments.
+The original design (already spec'd, not re-derived from scratch when picked back up):
+JWT auth via `mcpAuthentication`, provider-agnostic through three env vars
+(`OIDC_ISSUER`/`OIDC_AUDIENCE`/`OIDC_JWKS_URI`) rendered into `config.yaml` by a small
+`config-init` sidecar (agentgateway's official image is distroless, no `envsubst`
+available inside it), with a normalized `role` JWT claim so the CEL policy never
+references a specific identity provider by name. AWS Cognito first (a `setup-cognito.sh`
+script provisions a real User Pool + role-claim Lambda trigger), Okta/Entra ID as
+later, separate steps. See the follow-up GitHub issue for the full spec.

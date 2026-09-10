@@ -2,10 +2,7 @@
   "mcpServers": {
     "gateway": {
       "type": "http",
-      "url": "http://agentgateway:4000/mcp",
-      "headers": {
-        "Authorization": "Bearer ${AGENTGATEWAY_TOKEN}"
-      }
+      "url": "http://agentgateway:4000/mcp"
     }
   }
 }

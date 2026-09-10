@@ -2,12 +2,11 @@ services:
   math-server:
     build: ./math-server
     # No published host port — reached only via Compose's internal DNS
-    # (agentgateway's config.yaml.template targets it as
-    # http://math-server:3001/mcp). Nothing outside this compose network
-    # should be able to bypass the gateway to reach it directly, which is
-    # also true of docs-server below by the same reasoning (its
-    # gateway-bypass proof step uses `docker compose exec`, not a published
-    # port).
+    # (agentgateway's config.yaml targets it as http://math-server:3001/mcp).
+    # Nothing outside this compose network should be able to bypass the
+    # gateway to reach it directly, which is also true of docs-server below
+    # by the same reasoning (its gateway-bypass proof step uses
+    # `docker compose exec`, not a published port).
 
   docs-server:
     build: ./docs-server
@@ -21,42 +20,32 @@ services:
       # actually restricting access from the outside.
       - ./docs-server/sample-docs:/data/sample-docs
 
-  # Renders config.yaml.template -> config.yaml (see config-init/Dockerfile
-  # for why this can't happen inside agentgateway's own container) into a
-  # volume shared with the agentgateway service below, then exits.
-  config-init:
-    build: ./config-init
-    volumes:
-      - ./config.yaml.template:/template/config.yaml.template:ro
-      - agentgateway-config:/config
-    environment:
-      # The only provider-specific values in this whole stack. Swapping
-      # identity providers later means changing these three (see
-      # identity-providers/), never config.yaml.template or the CEL policy.
-      - OIDC_ISSUER=${OIDC_ISSUER:?set OIDC_ISSUER in .env - see identity-providers/cognito.env.example}
-      - OIDC_AUDIENCE=${OIDC_AUDIENCE:?set OIDC_AUDIENCE in .env - see identity-providers/cognito.env.example}
-      - OIDC_JWKS_URI=${OIDC_JWKS_URI:?set OIDC_JWKS_URI in .env - see identity-providers/cognito.env.example}
-
   agentgateway:
-    # Official distroless image, not built from source — see
-    # config-init/Dockerfile for why config rendering had to move to a
-    # sidecar as a consequence of that choice.
+    # Official distroless image, not built from source.
     image: cr.agentgateway.dev/agentgateway:v1.5.0
     depends_on:
-      config-init:
-        condition: service_completed_successfully
       math-server:
         condition: service_started
       docs-server:
         condition: service_started
     volumes:
-      - agentgateway-config:/config
+      # Plain static file, bind-mounted directly — no render step needed.
+      # (A prior version of this stack needed a config-init sidecar to
+      # envsubst OIDC_* values into a template before agentgateway started;
+      # with identity deferred, config.yaml has no variables left to
+      # render, so that machinery is gone too. Recoverable from git history
+      # at commit aef38b5 when identity work resumes.)
+      - ./config.yaml:/config/config.yaml:ro
     command: ["-f", "/config/config.yaml"]
     ports:
       # The one endpoint clients talk to — multiplexes math-server and
       # docs-server behind /mcp. Also serves the admin UI at
       # http://localhost:4000/ui (agentgateway's actual admin port, 15000,
-      # isn't published — reachable only through this same port).
+      # isn't published — reachable only through this same port). Published
+      # to the host (not just compose-internal) so other folders' pi
+      # containers (e.g. mcp/) can reach it via host.docker.internal:4000 —
+      # agentgateway/ and mcp/ are separate compose projects, per this
+      # repo's one-folder-per-topic convention.
       - "4000:4000"
 
   # Consistent with every other folder in this series (pi-multi-provider/,
@@ -75,18 +64,8 @@ services:
       - AWS_BEARER_TOKEN_BEDROCK=${AWS_BEARER_TOKEN_BEDROCK:-}
       - NVIDIA_API_KEY=${NVIDIA_API_KEY:-}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      # A short-lived Cognito-issued JWT, minted manually (see
-      # identity-providers/cognito.env.example for how) and exported before
-      # `docker compose run` — .mcp.json substitutes it into the gateway
-      # request's Authorization header the same way mcp/.mcp.json already
-      # does for GH_TOKEN. Expect to refresh this periodically; Cognito
-      # access tokens are short-lived by design.
-      - AGENTGATEWAY_TOKEN=${AGENTGATEWAY_TOKEN:-}
     depends_on:
       - agentgateway
     stdin_open: true
     tty: true
     command: bash
-
-volumes:
-  agentgateway-config:

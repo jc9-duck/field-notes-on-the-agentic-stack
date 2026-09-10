@@ -1,0 +1,49 @@
+# agentgateway config. Plain static file, not a template — the only reason
+# a rendered template + config-init sidecar existed before was to inject
+# OIDC_ISSUER/OIDC_AUDIENCE/OIDC_JWKS_URI for JWT auth. Identity is
+# deliberately deferred (see agentgateway/README.md and the follow-up
+# "JWT identity via AWS Cognito" issue) — no variables left to render, so
+# no template machinery either. When identity comes back as its own step,
+# the template + config-init pattern is recoverable from git history
+# (commit aef38b5).
+mcp:
+  port: 4000
+  targets:
+    # No policy attached here on purpose — math-server proves multiplexing
+    # works with zero interesting config; docs-server (below) is where the
+    # actual access-control demo lives.
+    - name: math
+      mcp:
+        # Separate host/port/path, not a single host: "http://host:port/path"
+        # string — agentgateway's schema supports a bare-origin single
+        # string (e.g. "https://example.com", no path) *or* this three-field
+        # form; concatenating a path onto the single-string form parses
+        # unpredictably (confirmed: produced a baffling "Invalid Host:
+        # math-server" runtime error, not a config-validation error, so it
+        # silently passed schema checks and broke at request time instead).
+        host: math-server
+        port: 3001
+        path: /mcp
+    - name: docs
+      mcp:
+        host: docs-server
+        port: 3002
+        path: /mcp
+  policies:
+    # mcp.tool.target is what makes one policy block apply differently per
+    # backend within a single multiplexed endpoint: math stays fully open,
+    # docs is read-only. No JWT/identity requirement right now (deliberately
+    # deferred — see README) — write/delete on docs are unconditionally
+    # withheld by the gateway rather than role-gated, until identity comes
+    # back as its own step. The original role-gated version
+    # (`has(jwt.role) && jwt.role == "editor"`) is in git history at
+    # commit aef38b5 and in the follow-up identity issue, ready to restore.
+    #
+    # This is also the actual proof-of-concept for #22: write/delete are
+    # genuinely implemented by docs-server (see docs-server/index.mjs) and
+    # work when called directly against that container. It's this policy,
+    # not a missing backend capability, that keeps them out of reach here.
+    mcpAuthorization:
+      rules:
+        - allow: 'mcp.tool.target == "math"'
+        - allow: 'mcp.tool.target == "docs" && mcp.tool.name == "read"'

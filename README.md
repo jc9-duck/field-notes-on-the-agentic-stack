@@ -58,22 +58,20 @@ Same Docker Desktop/Colima notes as `pi-multi-provider/` above.
 
 [agentgateway](https://agentgateway.dev/) multiplexing two example MCP servers behind
 one endpoint, with tool-level access control (the gateway exposes only `read` from a
-server that genuinely also implements `write`/`delete`) and JWT identity via AWS
-Cognito — built so other identity providers can be swapped in later via
-`identity-providers/` without touching the gateway config itself.
+server that genuinely also implements `write`/`delete`). Identity (JWT via AWS Cognito,
+built to be provider-swappable) is designed but deliberately deferred to its own
+follow-up step rather than baked in upfront — see `agentgateway/README.md`.
 
 Quickstart:
 ```bash
 cd agentgateway
 cp .env.example .env   # fill in pi's provider keys
-./identity-providers/setup-cognito.sh   # provisions a Cognito User Pool, prints .env values
 docker compose build
-docker compose up -d math-server docs-server config-init agentgateway
+docker compose up -d math-server docs-server agentgateway
 ```
 
 See [`agentgateway/README.md`](agentgateway/README.md) for the full walkthrough
-(minting a test token, proving the gateway-vs-backend restriction, running pi against
-the gateway).
+(proving the gateway-vs-backend restriction, running pi against the gateway).
 
 ## What's coming
 
