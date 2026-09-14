@@ -24,6 +24,8 @@ mcp/switchyard-routing.jsonl
 mcp/.trace-server.log
 mcp/.failover-proxy.log
 mcp/failover.jsonl
+mcp/.mcp-trace-server.log
+mcp/logs/
 
 # Nested coding projects worked on from inside a container — their own repo,
 # not part of this series repo's tracking.

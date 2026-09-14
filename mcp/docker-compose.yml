@@ -14,6 +14,16 @@ services:
       # container. pi itself still reaches it via Compose DNS
       # (http://math-server:3001/mcp in mcp/.mcp.json below).
       - "3001:3001"
+    volumes:
+      # logs/: structured per-call log (mcp-calls.jsonl, one line per tool
+      # call), shared with docs-server below and read by mcp-trace-server.mjs
+      # (started in entrypoint.sh, inside the pi container -- which already
+      # mounts this whole folder at /work, so it sees the same file at
+      # /work/logs/mcp-calls.jsonl). A directory mount, not a single-file
+      # one: Compose auto-creates a missing directory cleanly, but would
+      # instead create a directory *in place of* a missing single file,
+      # breaking the write on a fresh clone that hasn't run this yet.
+      - ./logs:/data/logs
 
   docs-server:
     build: ./docs-server
@@ -30,6 +40,8 @@ services:
       # agentgateway/'s version, this "before" picture has no policy layer,
       # so write/delete are just as reachable as read.
       - ./docs-server/sample-docs:/data/sample-docs
+      # Same shared call-log directory as math-server above.
+      - ./logs:/data/logs
 
   pi:
     build: .
@@ -84,6 +96,10 @@ services:
       - "5000:4000"
       # trace-server.mjs — browse request history at localhost:5321.
       - "5321:4321"
+      # mcp-trace-server.mjs — browse math-server/docs-server tool calls at
+      # localhost:5322. Next port after trace-server.mjs's 4321/5321 above,
+      # same shift-up-from-model-router/ numbering.
+      - "5322:4322"
       # failover-proxy.mjs — the actual entrypoint pi talks to by default.
       - "5100:4100"
     depends_on:
