@@ -21,7 +21,10 @@ function buildServer() {
     server.registerTool(
       name,
       { description: `${name} two numbers`, inputSchema: { a: z.number(), b: z.number() } },
-      async ({ a, b }) => ({ content: [{ type: "text", text: String(fn(a, b)) }] }),
+      async ({ a, b }) => {
+        console.log(`[math] ${name}(${a}, ${b})`);
+        return { content: [{ type: "text", text: String(fn(a, b)) }] };
+      },
     );
 
   binaryOp("add", (a, b) => a + b);
@@ -31,6 +34,7 @@ function buildServer() {
     "divide",
     { description: "divide two numbers", inputSchema: { a: z.number(), b: z.number() } },
     async ({ a, b }) => {
+      console.log(`[math] divide(${a}, ${b})`);
       if (b === 0) return { content: [{ type: "text", text: "error: division by zero" }], isError: true };
       return { content: [{ type: "text", text: String(a / b) }] };
     },

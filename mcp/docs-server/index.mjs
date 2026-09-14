@@ -41,6 +41,7 @@ function buildServer() {
       inputSchema: { filename: z.string().optional() },
     },
     async ({ filename }) => {
+      console.log(`[docs] read(${filename ?? "<list>"})`);
       if (!filename) {
         const files = await readdir(DOCS_DIR);
         return { content: [{ type: "text", text: files.join("\n") }] };
@@ -57,6 +58,7 @@ function buildServer() {
       inputSchema: { filename: z.string(), content: z.string() },
     },
     async ({ filename, content }) => {
+      console.log(`[docs] write(${filename}, ${content.length} bytes)`);
       await writeFile(resolveDoc(filename), content, "utf8");
       return { content: [{ type: "text", text: `wrote ${filename} (${content.length} bytes)` }] };
     },
@@ -69,6 +71,7 @@ function buildServer() {
       inputSchema: { filename: z.string() },
     },
     async ({ filename }) => {
+      console.log(`[docs] delete(${filename})`);
       await unlink(resolveDoc(filename));
       return { content: [{ type: "text", text: `deleted ${filename}` }] };
     },

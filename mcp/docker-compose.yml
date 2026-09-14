@@ -6,13 +6,23 @@ services:
   # referenced across folders.
   math-server:
     build: ./math-server
-    # No published host port: pi reaches it over Compose's internal DNS
-    # only (http://math-server:3001/mcp in mcp/.mcp.json below).
+    ports:
+      # Published (unlike agentgateway/'s version, which keeps this
+      # compose-internal only) so tools like MCP Inspector
+      # (`npx @modelcontextprotocol/inspector`) can point straight at
+      # http://localhost:3001/mcp from the host, not just from pi's
+      # container. pi itself still reaches it via Compose DNS
+      # (http://math-server:3001/mcp in mcp/.mcp.json below).
+      - "3001:3001"
 
   docs-server:
     build: ./docs-server
     environment:
       - DOCS_DIR=/data/sample-docs
+    ports:
+      # Same reasoning as math-server above — http://localhost:3002/mcp
+      # for MCP Inspector.
+      - "3002:3002"
     volumes:
       # Real files on the host, not an in-memory store — read returns
       # genuinely readable content, and write/delete visibly mutate this
