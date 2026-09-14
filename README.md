@@ -38,10 +38,17 @@ is mounted: `colima start --mount /path/to/drive:w`.
 
 ### [`mcp/`](mcp/)
 
-Wiring MCP (Model Context Protocol) servers into the same Pi setup: AWS's managed MCP
-server (reached via `mcp-proxy-for-aws`, since the self-hosted `awslabs.aws-api-mcp-server`
-is now superseded) and GitHub's hosted MCP server, both configured through `.mcp.json`. Also
-bakes in the GitHub CLI so `git push`/`gh` work from inside the container over HTTPS via a
+Wiring MCP (Model Context Protocol) servers directly into the same Pi setup, one
+`.mcp.json` entry per server — no gateway in front of them. This is the series' "before"
+picture: `agentgateway/` (below) is the "after," multiplexing the same kind of servers
+behind one endpoint. Four servers, each its own `.mcp.json` entry: GitHub's hosted MCP
+server (credentialed via `GH_TOKEN`); `math-server` and `docs-server`, the same
+hand-built servers `agentgateway/` fronts, copied in here per this repo's
+self-contained-snapshot convention — `docs-server`'s `write`/`delete` tools are fully
+reachable here, with no policy layer to restrict them, unlike the gateway version. (A
+fourth entry, AWS's managed MCP server via `mcp-proxy-for-aws`, was removed — it needs a
+live AWS SSO session that had expired; see `mcp/.mcp.json`'s git history.) Also bakes in
+the GitHub CLI so `git push`/`gh` work from inside the container over HTTPS via a
 `GH_TOKEN`, rather than fighting the host's global SSH config or the macOS Keychain.
 
 Quickstart:
