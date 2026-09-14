@@ -1,4 +1,26 @@
 services:
+  # Hand-built MCP servers pi wires directly via .mcp.json below (this
+  # folder's "before" picture — one .mcp.json entry per server, no gateway
+  # in front of them). Same source as agentgateway/math-server, copied in
+  # per this repo's self-contained-snapshot convention rather than
+  # referenced across folders.
+  math-server:
+    build: ./math-server
+    # No published host port: pi reaches it over Compose's internal DNS
+    # only (http://math-server:3001/mcp in mcp/.mcp.json below).
+
+  docs-server:
+    build: ./docs-server
+    environment:
+      - DOCS_DIR=/data/sample-docs
+    volumes:
+      # Real files on the host, not an in-memory store — read returns
+      # genuinely readable content, and write/delete visibly mutate this
+      # folder. Wired directly into pi here with no restriction: unlike
+      # agentgateway/'s version, this "before" picture has no policy layer,
+      # so write/delete are just as reachable as read.
+      - ./docs-server/sample-docs:/data/sample-docs
+
   pi:
     build: .
     working_dir: /work
@@ -54,6 +76,9 @@ services:
       - "5321:4321"
       # failover-proxy.mjs — the actual entrypoint pi talks to by default.
       - "5100:4100"
+    depends_on:
+      - math-server
+      - docs-server
     stdin_open: true
     tty: true
     command: bash
