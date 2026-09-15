@@ -7,4 +7,9 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 docker compose build
-exec docker compose run --rm pi
+# --service-ports: `docker compose run` does NOT publish the `ports:`
+# section by default (unlike `docker compose up`) -- without this flag,
+# switchyard (5000), trace-server (5321), mcp-trace-server (5322), and
+# failover-proxy (5100) all silently fail to bind on the host, even though
+# they're running fine inside the container.
+exec docker compose run --rm --service-ports pi

@@ -55,9 +55,13 @@ Quickstart:
 ```bash
 cd mcp
 cp .env.example .env   # fill in provider keys, plus GH_TOKEN for git push + the github MCP server
-docker compose build
-docker compose run --rm pi
+./dev.sh                # always rebuilds first, then runs pi with ports published
 ```
+`./dev.sh` runs `docker compose run --rm --service-ports pi` under the hood --
+the `--service-ports` flag matters: without it, `docker compose run` silently
+doesn't publish any of `ports:` (switchyard on 5000, trace-server on 5321,
+mcp-trace-server on 5322, failover-proxy on 5100), even though they're all
+running fine inside the container.
 
 Same Docker Desktop/Colima notes as `pi-multi-provider/` above.
 
