@@ -51,11 +51,18 @@ live AWS SSO session that had expired; see `mcp/.mcp.json`'s git history.) Also 
 the GitHub CLI so `git push`/`gh` work from inside the container over HTTPS via a
 `GH_TOKEN`, rather than fighting the host's global SSH config or the macOS Keychain.
 
+Also includes `mcp-inspector` — MCP's own dev tool, containerized rather than left as an
+ad-hoc `npx` command — for browsing exactly what `math-server`/`docs-server` expose
+(tools, resources, prompts) and calling them directly, no `curl` needed.
+
 Quickstart:
 ```bash
 cd mcp
 cp .env.example .env   # fill in provider keys, plus GH_TOKEN for git push + the github MCP server
 ./dev.sh                # always rebuilds first, then runs pi with ports published
+
+# Optional: browse math-server/docs-server's tools directly
+docker compose up -d mcp-inspector   # open http://localhost:6274 (URL w/ token printed in logs)
 ```
 `./dev.sh` runs `docker compose run --rm --service-ports pi` under the hood --
 the `--service-ports` flag matters: without it, `docker compose run` silently
