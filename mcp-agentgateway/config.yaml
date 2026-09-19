@@ -1,0 +1,41 @@
+# agentgateway config, adapted from agentgateway/config.yaml but scoped to the
+# same 3 servers mcp/'s .mcp.json already wires directly (math, docs, github) --
+# this folder's point is a side-by-side raw-vs-gated comparison of those 3, not
+# multiplexing additional live servers. Plain static file, no templating: identity
+# is deferred here exactly as it is in agentgateway/ (see its README).
+mcp:
+  port: 4000
+  targets:
+    # No policy attached -- math-server proves multiplexing works with zero
+    # interesting config; docs-server (below) is where the access-control demo is.
+    - name: math
+      mcp:
+        host: math-server
+        port: 3001
+        path: /mcp
+    - name: docs
+      mcp:
+        host: docs-server
+        port: 3002
+        path: /mcp
+    - name: github
+      mcp:
+        host: https://api.githubcopilot.com/mcp/
+      # backendAuth injects the Authorization header from the gateway
+      # container's own env -- pi/Inspector never see GH_TOKEN directly.
+      policies:
+        backendAuth:
+          key: "$GH_TOKEN"
+  policies:
+    # mcp.tool.target scopes the rule to one backend within the single
+    # multiplexed endpoint: math and github stay fully open, docs is
+    # read-only. write/delete are genuinely implemented by docs-server (see
+    # docs-server/index.mjs) and still work when called directly against
+    # that container on its own published port -- it's this policy, not a
+    # missing backend capability, that keeps them out of reach through the
+    # gateway. Matches agentgateway/config.yaml's proven pattern.
+    mcpAuthorization:
+      rules:
+        - allow: 'mcp.tool.target == "math"'
+        - allow: 'mcp.tool.target == "docs" && mcp.tool.name == "read"'
+        - allow: 'mcp.tool.target == "github"'

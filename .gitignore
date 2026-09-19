@@ -6,12 +6,14 @@ pi-multi-provider/.env
 model-router/.env
 mcp/.env
 agentgateway/.env
+mcp-agentgateway/.env
 
 # Session history / runtime state — not meant to be published
 pi-multi-provider/.pi/
 model-router/.pi/
 mcp/.pi/
 agentgateway/.pi/
+mcp-agentgateway/.pi/
 
 # switchyard-server's own runtime logs — regenerated on every container start
 model-router/.switchyard.log
@@ -26,10 +28,18 @@ mcp/.failover-proxy.log
 mcp/failover.jsonl
 mcp/.mcp-trace-server.log
 mcp/logs/
+mcp-agentgateway/.switchyard.log
+mcp-agentgateway/switchyard-routing.jsonl
+mcp-agentgateway/.trace-server.log
+mcp-agentgateway/.failover-proxy.log
+mcp-agentgateway/failover.jsonl
+mcp-agentgateway/.mcp-trace-server.log
+mcp-agentgateway/logs/
 
 # Nested coding projects worked on from inside a container — their own repo,
 # not part of this series repo's tracking.
 mcp/workspace/
+mcp-agentgateway/workspace/
 
 # agentgateway's math-server/docs-server are built inside their own Docker
 # images (npm install runs there); node_modules from installing locally to

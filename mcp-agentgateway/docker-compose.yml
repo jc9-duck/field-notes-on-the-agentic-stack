@@ -1,0 +1,198 @@
+services:
+  # MCP's own dev tool: point it at math-server's or docs-server's /mcp URL
+  # (http://math-server:3001/mcp or http://docs-server:3002/mcp from inside
+  # this compose network, or the published localhost:3001/3002 from the
+  # host) and get a UI over exactly what that server exposes -- tools,
+  # resources, prompts -- plus live tools/call testing, no curl needed.
+  # Containerized rather than left as an ad-hoc `npx` command on the host so
+  # it's reproducible the same way everything else here is: one
+  # `docker compose up` away, not a separate thing to remember to install.
+  mcp-inspector:
+    image: node:22-slim
+    working_dir: /work
+    # Pinned to a specific version, not @latest -- same supply-chain-safety
+    # convention as mcp-proxy-for-aws elsewhere in this repo.
+    command: ["npx", "-y", "@modelcontextprotocol/inspector@2.6.0"]
+    environment:
+      # Inspector's web server refuses to bind anything but loopback by
+      # default -- its own backend can spawn local processes and reach MCP
+      # servers on your behalf, exactly the kind of exposure DNS-rebinding
+      # attacks target (same class of protection math-server/docs-server's
+      # allowedHosts works around, just enforced the opposite way here: by
+      # refusing to bind at all rather than rejecting the Host header).
+      # DANGEROUSLY_BIND_ALL_INTERFACES is Inspector's own documented escape
+      # hatch for exactly this case -- "inside an isolated container" -- and
+      # this container is reachable only via the published ports below, not
+      # the wider network.
+      - HOST=0.0.0.0
+      - DANGEROUSLY_BIND_ALL_INTERFACES=true
+      # Pinned rather than left to auto-increment-on-conflict, so the
+      # published ports below are always right.
+      - CLIENT_PORT=6274
+      - MCP_SANDBOX_PORT=6275
+      - MCP_APP_ORIGIN_PORT=6278
+    ports:
+      - "6274:6274"   # main web UI -- open this one in a browser
+      - "6275:6275"   # MCP Apps sandbox iframe
+      - "6278:6278"   # MCP Apps origin (only used by servers declaring _meta.ui.domain)
+
+  # Hand-built MCP servers pi wires directly via .mcp.json below (this
+  # folder's "before" picture — one .mcp.json entry per server, no gateway
+  # in front of them). Same source as agentgateway/math-server, copied in
+  # per this repo's self-contained-snapshot convention rather than
+  # referenced across folders.
+  math-server:
+    build: ./math-server
+    ports:
+      # Published (unlike agentgateway/'s version, which keeps this
+      # compose-internal only) so tools like MCP Inspector
+      # (`npx @modelcontextprotocol/inspector`) can point straight at
+      # http://localhost:3001/mcp from the host, not just from pi's
+      # container. pi itself still reaches it via Compose DNS
+      # (http://math-server:3001/mcp in mcp/.mcp.json below).
+      - "3001:3001"
+    volumes:
+      # logs/: structured per-call log (mcp-calls.jsonl, one line per tool
+      # call), shared with docs-server below and read by mcp-trace-server.mjs
+      # (started in entrypoint.sh, inside the pi container -- which already
+      # mounts this whole folder at /work, so it sees the same file at
+      # /work/logs/mcp-calls.jsonl). A directory mount, not a single-file
+      # one: Compose auto-creates a missing directory cleanly, but would
+      # instead create a directory *in place of* a missing single file,
+      # breaking the write on a fresh clone that hasn't run this yet.
+      - ./logs:/data/logs
+
+  docs-server:
+    build: ./docs-server
+    environment:
+      - DOCS_DIR=/data/sample-docs
+    ports:
+      # Same reasoning as math-server above — http://localhost:3002/mcp
+      # for MCP Inspector.
+      - "3002:3002"
+    volumes:
+      # Real files on the host, not an in-memory store — read returns
+      # genuinely readable content, and write/delete visibly mutate this
+      # folder. Wired directly into pi here with no restriction: unlike
+      # agentgateway/'s version, this "before" picture has no policy layer,
+      # so write/delete are just as reachable as read.
+      - ./docs-server/sample-docs:/data/sample-docs
+      # Same shared call-log directory as math-server above.
+      - ./logs:/data/logs
+
+  # Fronts math-server/docs-server (github is external) with tool-level policy,
+  # for a live raw-vs-gated comparison against the same servers above via
+  # MCP Inspector -- see config.yaml and README.md. Adapted from
+  # agentgateway/docker-compose.yml's own agentgateway service.
+  agentgateway:
+    image: cr.agentgateway.dev/agentgateway:v1.5.0
+    depends_on:
+      math-server:
+        condition: service_started
+      docs-server:
+        condition: service_started
+    volumes:
+      - ./config.yaml:/config/config.yaml:ro
+    environment:
+      - GH_TOKEN=${GH_TOKEN:-}
+    command: ["-f", "/config/config.yaml"]
+    ports:
+      # Not 4000 -- avoids colliding with agentgateway/'s own 4000:4000 if
+      # both folders are ever run at the same time. Also serves the admin UI
+      # at http://localhost:4001/ui.
+      - "4001:4000"
+
+  pi:
+    build: .
+    working_dir: /work
+    volumes:
+      # Relative, not a hardcoded absolute path: this folder now gets checked
+      # out into different locations (worktrees), and a hardcoded path here
+      # would silently keep mounting whatever the original checkout was,
+      # regardless of where this compose file is actually run from. Compose
+      # resolves relative paths against this file's own directory.
+      - .:/work
+      # Mount your host AWS credentials read-only rather than duplicating
+      # keys into env vars. AWS_PROFILE below selects which one to use.
+      - ~/.aws:/root/.aws:ro
+      # pi's Ctrl+V image paste writes the clipboard image to the host's
+      # temp dir and hands pi that absolute path. Without this, pi runs
+      # inside the container and that path doesn't exist there -- paste
+      # silently degrades to sending the path as plain text instead of an
+      # image (no error, just a model that "can't see" anything). Mounting
+      # $TMPDIR at the identical guest path makes the pasted file visible
+      # to the container under the exact path pi already has. Falls back to
+      # /tmp if $TMPDIR isn't exported in the shell running `docker compose`.
+      - ${TMPDIR:-/tmp}:${TMPDIR:-/tmp}:ro
+    environment:
+      - AWS_PROFILE=${AWS_PROFILE:-default}
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+      # Bedrock API key (bearer token) auth — simpler alternative to the
+      # SSO profile above. Export AWS_BEARER_TOKEN_BEDROCK in the shell
+      # you run `docker compose` from; never hardcode it here.
+      - AWS_BEARER_TOKEN_BEDROCK=${AWS_BEARER_TOKEN_BEDROCK:-}
+      # NVIDIA NIM (nvapi-... key from build.nvidia.com / NVIDIA Inference Hub).
+      - NVIDIA_API_KEY=${NVIDIA_API_KEY:-}
+      # Only needed if you're testing a non-Bedrock provider directly.
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      # OpenAI direct — last resort in the failover chain, in case AWS
+      # itself is having an outage (from platform.openai.com).
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      # GitHub CLI/git push auth. Export via `export GH_TOKEN=$(gh auth token)`
+      # on the host before running compose — never hardcode it here. Using a
+      # token instead of mounting host SSH keys or ~/.config/gh: the global
+      # SSH config forces an unrelated identity for all github.com hosts, and
+      # gh's token normally lives in the macOS Keychain, unreadable from Linux.
+      - GH_TOKEN=${GH_TOKEN:-}
+    ports:
+      # Host-side ports shifted up from model-router/'s originals (4000/
+      # 4321/4100) so both projects' containers can run at the same time
+      # without a port collision — internal container ports are unchanged,
+      # only the host-facing mapping differs.
+      #
+      # Publish switchyard-server's port so you can `curl localhost:5000/...`
+      # from the Mac host directly, same as its own docs' verification steps.
+      - "5000:4000"
+      # trace-server.mjs — browse request history at localhost:5321.
+      - "5321:4321"
+      # mcp-trace-server.mjs — browse math-server/docs-server tool calls at
+      # localhost:5322. Next port after trace-server.mjs's 4321/5321 above,
+      # same shift-up-from-model-router/ numbering.
+      - "5322:4322"
+      # failover-proxy.mjs — the actual entrypoint pi talks to by default.
+      - "5100:4100"
+    depends_on:
+      - math-server
+      - docs-server
+    stdin_open: true
+    tty: true
+    command: bash
+
+  # Scrapes switchyard-server's /metrics (Prometheus text, exposed by its
+  # own OpenTelemetry provider) from the pi container above. Reaches it via
+  # Compose's built-in DNS ("pi" service name), not the published host port.
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "127.0.0.1:9090:9090"
+    depends_on:
+      - pi
+
+  # Pre-provisioned (datasource + dashboard already loaded, anonymous
+  # Admin access) so there's no manual setup step — open
+  # http://localhost:3000 and the routing dashboard is just there.
+  grafana:
+    image: grafana/grafana:latest
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_AUTH_DISABLE_LOGIN_FORM=true
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      - prometheus
