@@ -39,13 +39,6 @@ in place. Current folders, oldest to newest:
   third-party ones) behind one endpoint, with tool-level policy — e.g. exposing only
   `read` from a backend that also genuinely implements `write`/`delete`. See
   `agentgateway/README.md` for the full walkthrough.
-- **`mcp-agentgateway/`** — a copy of `mcp/`'s full stack (kept in sync the same way
-  `mcp/`/`model-router/` are; diff before assuming a fix belongs in only one) with an
-  `agentgateway` service added on top, fronting the same 3 servers `mcp/` wires
-  directly (`math`, `docs`, `github`) with the same read-only-`docs` policy
-  `agentgateway/` proves. Exists so the before/after contrast can be shown in one
-  folder via MCP Inspector, without touching either `mcp/` or `agentgateway/` in
-  place. See `mcp-agentgateway/README.md`.
 
 Each folder's own `README.md` (where present) or the root `README.md`'s per-folder
 section is the first place to check for that folder's specifics before reading code.

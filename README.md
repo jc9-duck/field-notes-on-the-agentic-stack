@@ -41,8 +41,7 @@ is mounted: `colima start --mount /path/to/drive:w`.
 Wiring MCP (Model Context Protocol) servers directly into the same Pi setup, one
 `.mcp.json` entry per server — no gateway in front of them. This is the series' "before"
 picture: `agentgateway/` (below) is the "after," multiplexing the same kind of servers
-behind one endpoint (`mcp-agentgateway/`, further below, shows both pictures side by
-side in one folder). Four servers, each its own `.mcp.json` entry: GitHub's hosted MCP
+behind one endpoint. Four servers, each its own `.mcp.json` entry: GitHub's hosted MCP
 server (credentialed via `GH_TOKEN`); `math-server` and `docs-server`, the same
 hand-built servers `agentgateway/` fronts, copied in here per this repo's
 self-contained-snapshot convention — `docs-server`'s `write`/`delete` tools are fully
@@ -79,8 +78,7 @@ Same Docker Desktop/Colima notes as `pi-multi-provider/` above.
 one endpoint, with tool-level access control (the gateway exposes only `read` from a
 server that genuinely also implements `write`/`delete`). Identity (JWT via AWS Cognito,
 built to be provider-swappable) is designed but deliberately deferred to its own
-follow-up step rather than baked in upfront — see `agentgateway/README.md`. See
-`mcp-agentgateway/` below for a side-by-side raw-vs-gated demo of this same policy.
+follow-up step rather than baked in upfront — see `agentgateway/README.md`.
 
 Quickstart:
 ```bash
@@ -92,27 +90,6 @@ docker compose up -d math-server docs-server agentgateway
 
 See [`agentgateway/README.md`](agentgateway/README.md) for the full walkthrough
 (proving the gateway-vs-backend restriction, running pi against the gateway).
-
-### [`mcp-agentgateway/`](mcp-agentgateway/)
-
-A copy of `mcp/`'s full stack with an `agentgateway` service added, fronting the same
-3 servers (`math`, `docs`, `github`) with the same read-only-`docs` policy
-`agentgateway/` already proved — so both pictures can be shown side by side in one
-place, without switching folders. Point the same MCP Inspector at the raw
-`docs-server` (read/write/delete all work), then at the gateway (only `read` works,
-`write`/`delete` are hidden as unknown tools).
-
-Quickstart:
-```bash
-cd mcp-agentgateway
-cp .env.example .env   # fill in provider keys, plus GH_TOKEN
-./dev.sh
-export GH_TOKEN=$(gh auth token)
-docker compose up -d agentgateway mcp-inspector   # gateway on :4001, Inspector on :6274
-```
-
-See [`mcp-agentgateway/README.md`](mcp-agentgateway/README.md) for the full
-raw-vs-gated walkthrough.
 
 ## What's coming
 
