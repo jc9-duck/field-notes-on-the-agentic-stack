@@ -37,7 +37,10 @@ in place. Current folders, oldest to newest:
 - **`agentgateway/`** — the **"after"** picture: [agentgateway](https://agentgateway.dev/)
   multiplexing multiple MCP servers (the same `math-server`/`docs-server`, plus live
   third-party ones) behind one endpoint, with tool-level policy — e.g. exposing only
-  `read` from a backend that also genuinely implements `write`/`delete`. See
+  `read` from a backend that also genuinely implements `write`/`delete`.
+  `docs-server` is published directly (`localhost:3002`) alongside the gateway
+  (`localhost:4000`), and a containerized MCP Inspector service lets you point at
+  either and compare the raw vs. gated tool list in the same UI. See
   `agentgateway/README.md` for the full walkthrough.
 
 Each folder's own `README.md` (where present) or the root `README.md`'s per-folder

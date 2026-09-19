@@ -12,9 +12,15 @@ iteration is deliberately all no-auth-required targets; those are later steps.
 
 - `math-server/` — arithmetic tools, no interesting policy. Pure multiplexing proof.
 - `docs-server/` — `read`/`write`/`delete` tools over a real bind-mounted folder
-  (`docs-server/sample-docs/`). agentgateway restricts the gateway to `read` only;
-  `write`/`delete` still work if you call `docs-server` directly, proving the
-  restriction is gateway-enforced, not backend-enforced.
+  (`docs-server/sample-docs/`), published directly on `localhost:3002` (unlike
+  `math-server`, which is compose-internal only). agentgateway restricts the
+  gateway to `read` only; `write`/`delete` still work if you call `docs-server`
+  directly on its own port, proving the restriction is gateway-enforced, not
+  backend-enforced.
+- `mcp-inspector` — MCP's own dev tool, containerized (pinned
+  `@modelcontextprotocol/inspector@2.6.0`), for browsing the before/after
+  contrast above visually rather than via curl — see "Proving the restriction
+  visually" below.
 - `github` — GitHub's hosted MCP server (`api.githubcopilot.com/mcp/`), live and
   credentialed via `GH_TOKEN`. agentgateway injects the Authorization header itself
   (`policies.backendAuth` on the target, resolved from the gateway container's own env)
@@ -58,6 +64,24 @@ docker compose up -d math-server docs-server agentgateway
 Runs on either Docker Desktop or [Colima](https://github.com/abiosoft/colima). If you're
 on Colima and your project lives outside `$HOME` (e.g. an external drive), make sure
 that path is mounted: `colima start --mount /path/to/drive:w`.
+
+### Proving the restriction visually, via MCP Inspector
+
+```bash
+docker compose up -d mcp-inspector   # open http://localhost:6274 (URL w/ token printed in logs)
+```
+
+1. Connect Inspector to `http://localhost:3002/mcp` (raw `docs-server`, published
+   directly to the host). `tools/list` shows `read`, `write`, `delete`. Call `write`
+   or `delete` — both succeed, mutating real files under
+   `docs-server/sample-docs/`.
+2. Point the same Inspector at `http://localhost:4000/mcp` (`agentgateway`).
+   `tools/list` shows `docs_read` but **not** `docs_write`/`docs_delete` — the CEL
+   policy filters `tools/list` itself, not just enforcement. Calling `docs_read`
+   succeeds; calling `docs_delete` by name returns `Unknown tool: docs_delete`.
+
+That's the whole before/after: same backend, same files, two different ports —
+one genuinely restricted, one not.
 
 ### Proving the multiplexing + tool-restriction demo
 

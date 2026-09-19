@@ -1,17 +1,41 @@
 services:
+  # MCP's own dev tool: point it at docs-server's raw /mcp URL to see the
+  # unrestricted tool set, then at agentgateway's /mcp URL to see the same
+  # backend with docs_write/docs_delete filtered out -- the actual
+  # before/after proof this folder exists to make, side by side in one UI
+  # instead of curl. Same pinned version/ports as mcp/'s copy of this service.
+  mcp-inspector:
+    image: node:22-slim
+    working_dir: /work
+    command: ["npx", "-y", "@modelcontextprotocol/inspector@2.6.0"]
+    environment:
+      - HOST=0.0.0.0
+      - DANGEROUSLY_BIND_ALL_INTERFACES=true
+      - CLIENT_PORT=6274
+      - MCP_SANDBOX_PORT=6275
+      - MCP_APP_ORIGIN_PORT=6278
+    ports:
+      - "6274:6274"   # main web UI -- open this one in a browser
+      - "6275:6275"   # MCP Apps sandbox iframe
+      - "6278:6278"   # MCP Apps origin (only used by servers declaring _meta.ui.domain)
+
   math-server:
     build: ./math-server
-    # No published host port — reached only via Compose's internal DNS
-    # (agentgateway's config.yaml targets it as http://math-server:3001/mcp).
-    # Nothing outside this compose network should be able to bypass the
-    # gateway to reach it directly, which is also true of docs-server below
-    # by the same reasoning (its gateway-bypass proof step uses
-    # `docker compose exec`, not a published port).
+    # No published host port -- no interesting policy on this target, so
+    # there's nothing to contrast a "raw" view against (unlike docs-server
+    # below, which is the actual before/after demo).
 
   docs-server:
     build: ./docs-server
     environment:
       - DOCS_DIR=/data/sample-docs
+    ports:
+      # Published so MCP Inspector (or curl) can connect directly to
+      # http://localhost:3002/mcp and see read/write/delete all present and
+      # working -- the "raw" half of the before/after demo. Contrast this
+      # against the same backend through agentgateway on :4000, where the
+      # config.yaml policy filters write/delete out of tools/list entirely.
+      - "3002:3002"
     volumes:
       # Real files on the host, not an in-memory store — read returns
       # genuinely readable content, and write/delete visibly mutate this

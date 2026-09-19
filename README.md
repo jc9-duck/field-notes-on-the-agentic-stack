@@ -86,10 +86,14 @@ cd agentgateway
 cp .env.example .env   # fill in pi's provider keys
 docker compose build
 docker compose up -d math-server docs-server agentgateway
+
+# Optional: browse the before/after restriction visually instead of via curl
+docker compose up -d mcp-inspector   # open http://localhost:6274 (URL w/ token printed in logs)
 ```
 
 See [`agentgateway/README.md`](agentgateway/README.md) for the full walkthrough
-(proving the gateway-vs-backend restriction, running pi against the gateway).
+(proving the gateway-vs-backend restriction via Inspector or curl, running pi
+against the gateway).
 
 ## What's coming
 
