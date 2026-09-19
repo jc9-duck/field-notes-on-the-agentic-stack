@@ -83,9 +83,9 @@ follow-up step rather than baked in upfront — see `agentgateway/README.md`.
 Quickstart:
 ```bash
 cd agentgateway
-cp .env.example .env   # fill in pi's provider keys
-docker compose build
-docker compose up -d math-server docs-server agentgateway
+cp .env.example .env   # fill in pi's provider keys, plus GH_TOKEN for the live github target
+export GH_TOKEN=$(gh auth token)
+./dev.sh                # always rebuilds first, brings up math/docs/gateway, then runs pi
 
 # Optional: browse the before/after restriction visually instead of via curl
 docker compose up -d mcp-inspector   # open http://localhost:6274 (URL w/ token printed in logs)
