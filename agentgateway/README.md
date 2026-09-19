@@ -57,9 +57,12 @@ below still holds without any token.
 cd agentgateway
 cp .env.example .env   # fill in pi's provider keys, plus GH_TOKEN for the live github target
 export GH_TOKEN=$(gh auth token)   # or set it in .env directly
-docker compose build
-docker compose up -d math-server docs-server agentgateway
+./dev.sh                # always rebuilds, brings up math/docs/gateway, then runs pi
 ```
+
+`./dev.sh` is the one-step version of: `docker compose build`, then
+`docker compose up -d math-server docs-server agentgateway`, then
+`docker compose run --rm pi` — same pattern as `mcp/dev.sh`.
 
 Runs on either Docker Desktop or [Colima](https://github.com/abiosoft/colima). If you're
 on Colima and your project lives outside `$HOME` (e.g. an external drive), make sure
