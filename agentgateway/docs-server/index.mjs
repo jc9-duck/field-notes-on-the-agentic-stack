@@ -15,6 +15,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
 import { z } from "zod";
+import { logCall } from "./log-call.mjs";
 
 const DOCS_DIR = process.env.DOCS_DIR ?? "/data/sample-docs";
 
@@ -31,6 +32,23 @@ function resolveDoc(filename) {
   return resolved;
 }
 
+// Wraps a tool body so a thrown error (missing file, path traversal, etc.)
+// still gets logged before propagating -- without this, only successful
+// calls would show up in mcp-trace-server.mjs, since registerTool's own
+// error handling converts the throw into an isError response upstream of
+// any logging we'd otherwise only do on the success path.
+async function runTool(tool, args, fn) {
+  const start = performance.now();
+  try {
+    const text = await fn();
+    await logCall("docs", tool, args, { durationMs: performance.now() - start, result: text });
+    return { content: [{ type: "text", text }] };
+  } catch (err) {
+    await logCall("docs", tool, args, { durationMs: performance.now() - start, isError: true, result: err.message });
+    throw err;
+  }
+}
+
 function buildServer() {
   const server = new McpServer({ name: "docs-server", version: "1.0.0" });
 
@@ -40,14 +58,11 @@ function buildServer() {
       description: "Read a document by filename from the sample-docs folder. Omit filename to list available documents.",
       inputSchema: { filename: z.string().optional() },
     },
-    async ({ filename }) => {
-      if (!filename) {
-        const files = await readdir(DOCS_DIR);
-        return { content: [{ type: "text", text: files.join("\n") }] };
-      }
-      const text = await readFile(resolveDoc(filename), "utf8");
-      return { content: [{ type: "text", text }] };
-    },
+    ({ filename }) =>
+      runTool("read", { filename: filename ?? "<list>" }, async () => {
+        if (!filename) return (await readdir(DOCS_DIR)).join("\n");
+        return readFile(resolveDoc(filename), "utf8");
+      }),
   );
 
   server.registerTool(
@@ -56,10 +71,14 @@ function buildServer() {
       description: "Write (create or overwrite) a document in the sample-docs folder.",
       inputSchema: { filename: z.string(), content: z.string() },
     },
-    async ({ filename, content }) => {
-      await writeFile(resolveDoc(filename), content, "utf8");
-      return { content: [{ type: "text", text: `wrote ${filename} (${content.length} bytes)` }] };
-    },
+    // Logged as a byte count, not the raw content -- callers may write
+    // arbitrarily large or sensitive text, and the point of the viewer is
+    // to show what happened, not to double as a document store.
+    ({ filename, content }) =>
+      runTool("write", { filename, contentLength: content.length }, async () => {
+        await writeFile(resolveDoc(filename), content, "utf8");
+        return `wrote ${filename} (${content.length} bytes)`;
+      }),
   );
 
   server.registerTool(
@@ -68,10 +87,11 @@ function buildServer() {
       description: "Delete a document from the sample-docs folder.",
       inputSchema: { filename: z.string() },
     },
-    async ({ filename }) => {
-      await unlink(resolveDoc(filename));
-      return { content: [{ type: "text", text: `deleted ${filename}` }] };
-    },
+    ({ filename }) =>
+      runTool("delete", { filename }, async () => {
+        await unlink(resolveDoc(filename));
+        return `deleted ${filename}`;
+      }),
   );
 
   return server;

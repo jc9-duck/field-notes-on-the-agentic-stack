@@ -10,13 +10,22 @@ tools a client sees per-backend, independent of what the backend actually implem
 No identity, no guardrails, no request tracing, and no credentialed backends yet — this
 iteration is deliberately all no-auth-required targets; those are later steps.
 
+**Also carries `mcp/`'s full switchyard stack** — dynamic LLM routing
+(`switchyard-server`), a failover chain across providers, request tracing, and
+Prometheus/Grafana — so this folder now does both things at once: an MCP tool
+gateway *and* an LLM routing gateway, coexisting rather than living in separate
+folders. Ports are shifted from `mcp/`'s own (6xxx instead of 5xxx, 3102/3100/9190
+instead of 3002/3000/9090) specifically so both folders can run at the same time
+without colliding — see "Dynamic model routing" below.
+
 - `math-server/` — arithmetic tools, no interesting policy. Pure multiplexing proof.
 - `docs-server/` — `read`/`write`/`delete` tools over a real bind-mounted folder
-  (`docs-server/sample-docs/`), published directly on `localhost:3002` (unlike
-  `math-server`, which is compose-internal only). agentgateway restricts the
-  gateway to `read` only; `write`/`delete` still work if you call `docs-server`
-  directly on its own port, proving the restriction is gateway-enforced, not
-  backend-enforced.
+  (`docs-server/sample-docs/`), published directly on `localhost:3102` (unlike
+  `math-server`, which is compose-internal only — moved from `3002` to avoid
+  colliding with `mcp/`'s own docs-server, which already uses that port).
+  agentgateway restricts the gateway to `read` only; `write`/`delete` still work
+  if you call `docs-server` directly on its own port, proving the restriction is
+  gateway-enforced, not backend-enforced.
 - `mcp-inspector` — MCP's own dev tool, containerized (pinned
   `@modelcontextprotocol/inspector@2.6.0`), for browsing the before/after
   contrast above visually rather than via curl — see "Proving the restriction
@@ -57,13 +66,49 @@ below still holds without any token.
 cd agentgateway
 cp .env.example .env   # fill in pi's provider keys, plus GH_TOKEN for the live github target
 export GH_TOKEN=$(gh auth token)   # or set it in .env directly
-docker compose build
-docker compose up -d math-server docs-server agentgateway
+./dev.sh                # always rebuilds, brings up math/docs/gateway, then runs pi
 ```
+
+`./dev.sh` is the one-step version of: `docker compose build`, then
+`docker compose up -d math-server docs-server agentgateway`, then
+`docker compose run --rm pi` — same pattern as `mcp/dev.sh`.
 
 Runs on either Docker Desktop or [Colima](https://github.com/abiosoft/colima). If you're
 on Colima and your project lives outside `$HOME` (e.g. an external drive), make sure
 that path is mounted: `colima start --mount /path/to/drive:w`.
+
+### Dynamic model routing (switchyard), alongside the MCP gateway
+
+`switchyard-server`, `trace-server.mjs`, `mcp-trace-server.mjs`, and
+`failover-proxy.mjs` all run inside the `pi` container (started by
+`entrypoint.sh`, same as `mcp/`), and Prometheus/Grafana scrape/visualize
+switchyard's routing decisions. `./dev.sh` starts all of it automatically —
+nothing extra to run beyond bringing up `prometheus`/`grafana` if you want the
+dashboard:
+
+```bash
+docker compose up -d prometheus grafana   # optional -- dashboards at :3100
+```
+
+| What | Port | Check |
+|---|---|---|
+| switchyard-server | `6000` | `curl localhost:6000/health` |
+| trace-server.mjs (routing-decision viewer) | `6321` | open `http://localhost:6321` |
+| mcp-trace-server.mjs (math/docs call viewer) | `6322` | open `http://localhost:6322` |
+| failover-proxy.mjs (default entrypoint, `model: "auto"`) | `6100` | `curl localhost:6100/v1/models` |
+| Grafana (routing dashboard) | `3100` | open `http://localhost:3100` |
+| Prometheus | `9190` | open `http://localhost:9190` |
+
+Inside a `pi` session, `/model` now shows `switchyard` (direct classifier
+routes), `auto` (the failover chain — the default), and `ollama` (bypasses
+routing entirely), alongside `pi`'s own built-in providers. `routes.toml` and
+all four `pi-extensions/*.mjs` are carried over unchanged from `mcp/` — see
+that folder's own docs for how the weak/strong and task-type classifiers work.
+
+These ports are deliberately different from `mcp/`'s own (`5000`/`5321`/`5322`/
+`5100`/`3000`/`9090`) so both folders' stacks can run at the same time without
+a port collision — same reasoning `mcp/` already used when it shifted its own
+ports away from `model-router/`'s.
 
 ### Proving the restriction visually, via MCP Inspector
 
@@ -71,7 +116,7 @@ that path is mounted: `colima start --mount /path/to/drive:w`.
 docker compose up -d mcp-inspector   # open http://localhost:6274 (URL w/ token printed in logs)
 ```
 
-1. Connect Inspector to `http://localhost:3002/mcp` (raw `docs-server`, published
+1. Connect Inspector to `http://localhost:3102/mcp` (raw `docs-server`, published
    directly to the host). `tools/list` shows `read`, `write`, `delete`. Call `write`
    or `delete` — both succeed, mutating real files under
    `docs-server/sample-docs/`.

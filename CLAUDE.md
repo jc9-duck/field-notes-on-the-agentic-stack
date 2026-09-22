@@ -38,9 +38,15 @@ in place. Current folders, oldest to newest:
   multiplexing multiple MCP servers (the same `math-server`/`docs-server`, plus live
   third-party ones) behind one endpoint, with tool-level policy — e.g. exposing only
   `read` from a backend that also genuinely implements `write`/`delete`.
-  `docs-server` is published directly (`localhost:3002`) alongside the gateway
+  `docs-server` is published directly (`localhost:3102`) alongside the gateway
   (`localhost:4000`), and a containerized MCP Inspector service lets you point at
-  either and compare the raw vs. gated tool list in the same UI. See
+  either and compare the raw vs. gated tool list in the same UI. **Also carries the
+  same switchyard/trace/failover stack as `mcp/`/`model-router/`** (kept in sync with
+  those two the same way they're kept in sync with each other), on a shifted port
+  range (`6000`/`6321`/`6322`/`6100`/`3100`/`9190` instead of `mcp/`'s
+  `5000`/`5321`/`5322`/`5100`/`3000`/`9090`) specifically so `agentgateway/` and `mcp/`
+  can both run at the same time without a port collision. This folder is now the
+  series' combined state: MCP tool gateway *and* LLM routing gateway together. See
   `agentgateway/README.md` for the full walkthrough.
 
 Each folder's own `README.md` (where present) or the root `README.md`'s per-folder
@@ -117,7 +123,7 @@ its own build step, and there's no linter configured anywhere in the repo.
   a client's `initialize` handshake — one unreachable/misconfigured target fails the
   *entire* gateway's `initialize`, not just that target.
 
-## Switchyard / model routing (model-router/ and mcp/)
+## Switchyard / model routing (model-router/, mcp/, and agentgateway/)
 
 - `switchyard-server` is a Rust binary built from source in a multi-stage Dockerfile
   (`FROM rust:latest AS switchyard-builder`, musl-linked for portability) — if a rebuilt
