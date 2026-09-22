@@ -24,18 +24,26 @@ services:
     # No published host port -- no interesting policy on this target, so
     # there's nothing to contrast a "raw" view against (unlike docs-server
     # below, which is the actual before/after demo).
+    volumes:
+      # Structured per-call log (mcp-calls.jsonl), shared with docs-server
+      # below and read by mcp-trace-server.mjs inside the pi container --
+      # same pattern as mcp/'s copy of this service.
+      - ./logs:/data/logs
 
   docs-server:
     build: ./docs-server
     environment:
       - DOCS_DIR=/data/sample-docs
     ports:
-      # Published so MCP Inspector (or curl) can connect directly to
-      # http://localhost:3002/mcp and see read/write/delete all present and
+      # 3102, not 3002 -- mcp/'s own docs-server already publishes 3002, and
+      # with both folders' docs-server ports live at once (a real conflict
+      # hit while building this), only one can actually bind it. Published
+      # so MCP Inspector (or curl) can connect directly to
+      # http://localhost:3102/mcp and see read/write/delete all present and
       # working -- the "raw" half of the before/after demo. Contrast this
       # against the same backend through agentgateway on :4000, where the
       # config.yaml policy filters write/delete out of tools/list entirely.
-      - "3002:3002"
+      - "3102:3002"
     volumes:
       # Real files on the host, not an in-memory store — read returns
       # genuinely readable content, and write/delete visibly mutate this
@@ -43,6 +51,8 @@ services:
       # write here; the *gateway* (not a read-only mount) is what's
       # actually restricting access from the outside.
       - ./docs-server/sample-docs:/data/sample-docs
+      # Same shared call-log directory as math-server above.
+      - ./logs:/data/logs
 
   agentgateway:
     # Official distroless image, not built from source.
@@ -89,14 +99,64 @@ services:
     volumes:
       - .:/work
       - ~/.aws:/root/.aws:ro
+      # pi's Ctrl+V image paste writes the clipboard image to the host's
+      # temp dir and hands pi that absolute path -- mounting $TMPDIR at the
+      # identical guest path makes it visible inside the container. Same
+      # pattern as mcp/'s pi service.
+      - ${TMPDIR:-/tmp}:${TMPDIR:-/tmp}:ro
     environment:
       - AWS_PROFILE=${AWS_PROFILE:-default}
       - AWS_REGION=${AWS_REGION:-us-east-1}
       - AWS_BEARER_TOKEN_BEDROCK=${AWS_BEARER_TOKEN_BEDROCK:-}
       - NVIDIA_API_KEY=${NVIDIA_API_KEY:-}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      # Last resort in failover-proxy.mjs's chain, same as mcp/'s pi service.
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - GH_TOKEN=${GH_TOKEN:-}
+    ports:
+      # switchyard-server, trace-server.mjs, mcp-trace-server.mjs, and
+      # failover-proxy.mjs all run inside this container (started by
+      # entrypoint.sh, baked into the image the same way mcp/'s is) --
+      # published on 6xxx, not mcp/'s 5xxx, so both folders' stacks can run
+      # at the same time without a port collision. 6000 also happens to
+      # dodge macOS's AirPlay Receiver, which squats port 5000 by default.
+      - "6000:4000"   # switchyard-server -- curl localhost:6000/health
+      - "6321:4321"   # trace-server.mjs -- routing-decision viewer
+      - "6322:4322"   # mcp-trace-server.mjs -- math/docs tool-call viewer
+      - "6100:4100"   # failover-proxy.mjs -- the entrypoint pi talks to by default
     depends_on:
       - agentgateway
     stdin_open: true
     tty: true
     command: bash
+
+  # Scrapes switchyard-server's /metrics from the pi container above, via
+  # Compose's built-in DNS. Same config as mcp/'s copy (prometheus.yml
+  # targets the "pi" service by name, which exists here too).
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      # 9190, not mcp/'s 9090, so both folders can run at once.
+      - "127.0.0.1:9190:9090"
+    depends_on:
+      - pi
+
+  # Pre-provisioned (datasource + dashboard already loaded, anonymous Admin
+  # access) -- open http://localhost:3100 and the routing dashboard is just
+  # there. Same provisioning as mcp/'s copy.
+  grafana:
+    image: grafana/grafana:latest
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_AUTH_DISABLE_LOGIN_FORM=true
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      # 3100, not mcp/'s 3000, so both folders can run at once.
+      - "127.0.0.1:3100:3000"
+    depends_on:
+      - prometheus

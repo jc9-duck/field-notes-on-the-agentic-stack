@@ -76,9 +76,12 @@ Same Docker Desktop/Colima notes as `pi-multi-provider/` above.
 
 [agentgateway](https://agentgateway.dev/) multiplexing two example MCP servers behind
 one endpoint, with tool-level access control (the gateway exposes only `read` from a
-server that genuinely also implements `write`/`delete`). Identity (JWT via AWS Cognito,
-built to be provider-swappable) is designed but deliberately deferred to its own
-follow-up step rather than baked in upfront — see `agentgateway/README.md`.
+server that genuinely also implements `write`/`delete`). Also carries `mcp/`'s full
+switchyard stack (dynamic LLM routing, failover chain, request tracing,
+Prometheus/Grafana), on its own shifted port range so both folders can run at once —
+this is now the series' combined MCP-gateway-plus-model-routing folder. Identity (JWT
+via AWS Cognito, built to be provider-swappable) is designed but deliberately deferred
+to its own follow-up step rather than baked in upfront — see `agentgateway/README.md`.
 
 Quickstart:
 ```bash
