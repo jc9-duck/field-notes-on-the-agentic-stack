@@ -48,6 +48,11 @@ done
 # load — start it once here, leave it running, browse it whenever.
 node /work/trace-server.mjs >> /work/.trace-server.log 2>&1 &
 
+# mcp-trace-server.mjs: same pattern as trace-server.mjs above, but over
+# math-server/docs-server's own call log (mcp-calls.jsonl) instead of
+# switchyard's routing log -- unrelated log shapes, kept as its own viewer.
+node /work/mcp-trace-server.mjs >> /work/.mcp-trace-server.log 2>&1 &
+
 # failover-proxy.mjs: sits in front of switchyard-server (port 4000).
 # Switchyard's classifier picks a target by task complexity, not
 # availability — this adds the "if that target is actually down or

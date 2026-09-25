@@ -31,6 +31,9 @@ FROM node:22-slim
 # --ignore-scripts: disable install-time lifecycle scripts pi doesn't need.
 RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent
 
+# Ensure pi and its packages are up to date during image build
+RUN pi update --extensions
+
 # Bake in non-package settings (theme, defaults, retry, etc.) first — the
 # `pi install` lines below append their `packages` entries onto this same
 # file rather than overwriting it.

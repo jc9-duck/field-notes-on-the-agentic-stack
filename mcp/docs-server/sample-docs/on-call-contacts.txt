@@ -1,0 +1,7 @@
+On-call rotation (fake demo data, not real contacts)
+
+Primary:   J. Cooper  <jc9-duck@example.invalid>
+Secondary: A. Patel    <a.patel@example.invalid>
+Escalation: #agentic-stack-oncall (internal chat, fake channel)
+
+Rotation swaps happen Mondays 09:00 local time.

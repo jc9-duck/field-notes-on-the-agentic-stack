@@ -6,6 +6,14 @@
       "headers": {
         "Authorization": "Bearer ${GH_TOKEN}"
       }
+    },
+    "math": {
+      "type": "http",
+      "url": "http://math-server:3001/mcp"
+    },
+    "docs": {
+      "type": "http",
+      "url": "http://docs-server:3002/mcp"
     }
   }
 }
