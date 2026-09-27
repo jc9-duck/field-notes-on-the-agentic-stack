@@ -126,6 +126,27 @@ cache's RAM footprint — `OLLAMA_KV_CACHE_TYPE=q8_0` and flash attention are
 already set to offset that). This is a one-time host change, not something
 `docker compose up` can do for you.
 
+### Exposing curated tools to pi (`.mcp.json` `directTools`)
+
+`pi-mcp-adapter` defaults to **proxy mode**: pi's model sees one generic
+`mcp`/`mcp__gateway` tool ("MCP namespace proxy for gateway") instead of the
+gateway's actual tools. Next to a well-described built-in like `web_search`,
+a small model reliably picks `web_search` over the opaque proxy tool even for
+requests the gateway can answer directly (confirmed: GitHub-profile questions
+routed to `web_search` in 2/2 baseline runs). `.mcp.json`'s `directTools` list
+opts specific tools out of proxy mode so they appear to the model as their own
+named tools (`gateway_math_add`, `gateway_docs_read`, `gateway_github_get_me`,
+etc.) — this repo curates that list to 12 tools (math ×4, `docs_read`, 7
+GitHub read tools) rather than all 60 the gateway multiplexes, since the full
+set is ~143 KB of tool-schema JSON, too large to reliably fit a small local
+model's context alongside pi's own system prompt and tools.
+
+`AGENTS.md` in this folder is pi's [context-file](
+https://github.com/earendil-works/pi/blob/main/docs/configuration.md#context-files)
+mechanism (loaded automatically from the working directory, no project trust
+required) telling the model which of those curated tools to prefer over
+`web_search` for GitHub/docs/math questions.
+
 ### Proving the restriction visually, via MCP Inspector
 
 ```bash
