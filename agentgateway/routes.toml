@@ -197,16 +197,22 @@ llm_client = "bedrock"
 # Fix (host-side, not in this repo): set OLLAMA_CONTEXT_LENGTH=16384 in
 # ~/Library/LaunchAgents/homebrew.mxcl.ollama.plist and restart the ollama
 # service -- applies to every folder in this repo that talks to local Ollama
-# (model-router/, mcp/, agentgateway/), not just this route. Once applied and
-# verified, weak_target here may be able to go back to "local" like mcp/'s
-# routes.toml. Not yet applied/verified as of this comment -- re-test before
-# changing weak_target.
+# (model-router/, mcp/, agentgateway/), not just this route. That fix is not
+# yet applied on this host as of this commit (blocked on a host-level change
+# outside this repo's/this session's control). weak_target below was
+# measured against local-big both before and after this session's other
+# fixes and failed 0/9 in a 5-route eval (see model-eval.md) purely from
+# this truncation, every run timing out and falling through -- so it's set
+# to qwen-coder (Bedrock) instead, which scored 9/9 correct and fastest
+# (~6s/call). Once OLLAMA_CONTEXT_LENGTH is applied and re-verified,
+# weak_target can go back to local-big (or local, like mcp/'s routes.toml)
+# if free/local is preferred over qwen-coder's small Bedrock cost.
 [routes.smart]
 id = "switchyard"
 type = "llm_classifier"
 mode = "capability"
 classifier_target = "local"
-weak_target = "local-big"
+weak_target = "qwen-coder"
 strong_target = "cloud"
 base_threshold = 0.5
 # Default is "json_schema" (strict, schema-constrained decoding). Ollama's
