@@ -48,6 +48,54 @@ function log(entry) {
   }
 }
 
+// NVIDIA has been observed sending a mid-stream `{"error":{...}}` SSE frame
+// inside an otherwise-2xx response (a ResourceExhausted rate-limit that
+// arrives *after* the HTTP status/headers are already committed) -- from
+// `upstreamRes.ok`'s perspective that's a plain success, so without this
+// check the chain below would forward the error straight to pi and never
+// try the next target. Peeks the first SSE event on `text/event-stream`
+// responses only (a non-streaming 200 has no "mid-stream" to speak of);
+// returns `{ ok: true, reader, prelude }` so the caller can resume reading
+// from the same reader after replaying the already-consumed `prelude`
+// bytes, or `{ ok: false, body }` with the upstream connection already
+// aborted (`controller.abort()`, not just `reader.cancel()` -- confirmed by
+// test that `cancel()` alone leaves the underlying socket open server-side
+// until the provider's own timeout, which is exactly the abandoned-request
+// pattern behind the observed "ResourceExhausted 16/16" climbing past 16).
+async function peekSseError(upstreamRes, controller) {
+  const contentType = upstreamRes.headers.get("content-type") || "";
+  if (!contentType.includes("text/event-stream")) {
+    return { ok: true, reader: null, prelude: null };
+  }
+  const reader = upstreamRes.body.getReader();
+  const decoder = new TextDecoder();
+  let buffered = "";
+  // Read until one full SSE event (blank-line-terminated) or a sanity cap,
+  // in case a malformed stream never sends a terminator.
+  while (!buffered.includes("\n\n") && buffered.length < 8192) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffered += decoder.decode(value, { stream: true });
+  }
+  const firstEvent = buffered.split("\n\n")[0] || buffered;
+  for (const line of firstEvent.split("\n")) {
+    if (!line.startsWith("data:")) continue;
+    const payload = line.slice(5).trim();
+    if (payload === "[DONE]") continue;
+    try {
+      const parsed = JSON.parse(payload);
+      if (parsed?.error) {
+        controller.abort();
+        return { ok: false, body: buffered.slice(0, 300) };
+      }
+    } catch {
+      // Not JSON, or truncated mid-token -- a real content chunk, not an
+      // error signal. Fall through and treat this attempt as good.
+    }
+  }
+  return { ok: true, reader, prelude: buffered ? Buffer.from(buffered, "utf8") : null };
+}
+
 createServer(async (req, res) => {
   if (req.method === "GET" && req.url.startsWith("/v1/models")) {
     // A single client-visible model, "auto" — distinct from Switchyard's own
@@ -75,36 +123,89 @@ createServer(async (req, res) => {
     return;
   }
 
+  // If pi (or the eval harness's `timeout`) gives up and disconnects while
+  // an upstream call is still in flight, abort that call rather than
+  // leaving it running unattended -- an abandoned request still occupies a
+  // slot against NVIDIA's per-account concurrency limit, which is how a
+  // "ResourceExhausted (16/16)" figure was observed climbing well past 16
+  // over a session: every abandoned attempt kept holding its slot until the
+  // provider's own timeout, not this proxy's.
+  let responseSent = false;
+  let currentAbort = null;
+  let clientDisconnected = false;
+  res.on("close", () => {
+    if (!responseSent) {
+      clientDisconnected = true;
+      currentAbort?.abort();
+    }
+  });
+
   const attempts = [];
   for (const model of CHAIN) {
+    if (clientDisconnected) break;
+    const controller = new AbortController();
+    currentAbort = controller;
     let upstreamRes;
     try {
       upstreamRes = await fetch(UPSTREAM, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ ...body, model }),
+        signal: controller.signal,
       });
     } catch (err) {
       attempts.push({ model, ok: false, error: String(err?.message ?? err) });
       continue;
     }
+    if (clientDisconnected) break;
 
-    if (upstreamRes.ok) {
-      attempts.push({ model, ok: true, status: upstreamRes.status });
-      log({ chain: CHAIN, attempts, chosen: model });
-      res.writeHead(upstreamRes.status, {
-        "content-type": upstreamRes.headers.get("content-type") || "application/json",
-      });
-      for await (const chunk of upstreamRes.body) res.write(chunk);
-      res.end();
-      return;
+    // The client can disconnect at any point from here on (peeking or
+    // forwarding the stream), which rejects/throws via the same
+    // controller.signal -- catch that specifically so one client going away
+    // doesn't take an unhandled rejection down through the whole server
+    // (and every other in-flight request with it).
+    try {
+      if (upstreamRes.ok) {
+        const peek = await peekSseError(upstreamRes, controller);
+        if (peek.ok) {
+          attempts.push({ model, ok: true, status: upstreamRes.status });
+          log({ chain: CHAIN, attempts, chosen: model });
+          res.writeHead(upstreamRes.status, {
+            "content-type": upstreamRes.headers.get("content-type") || "application/json",
+          });
+          if (peek.prelude) res.write(peek.prelude);
+          if (peek.reader) {
+            while (true) {
+              const { done, value } = await peek.reader.read();
+              if (done) break;
+              res.write(value);
+            }
+          } else {
+            for await (const chunk of upstreamRes.body) res.write(chunk);
+          }
+          res.end();
+          responseSent = true;
+          return;
+        }
+        attempts.push({ model, ok: false, status: upstreamRes.status, body: peek.body, midStream: true });
+        continue;
+      }
+
+      const errBody = await upstreamRes.text().catch(() => "");
+      attempts.push({ model, ok: false, status: upstreamRes.status, body: errBody.slice(0, 300) });
+    } catch (err) {
+      if (clientDisconnected) break;
+      attempts.push({ model, ok: false, error: String(err?.message ?? err) });
     }
+  }
 
-    const errBody = await upstreamRes.text().catch(() => "");
-    attempts.push({ model, ok: false, status: upstreamRes.status, body: errBody.slice(0, 300) });
+  if (clientDisconnected) {
+    log({ chain: CHAIN, attempts, chosen: null, clientDisconnected: true });
+    return;
   }
 
   log({ chain: CHAIN, attempts, chosen: null });
   res.writeHead(502, { "content-type": "application/json" });
   res.end(JSON.stringify({ error: "every target in the failover chain failed", attempts }));
+  responseSent = true;
 }).listen(PORT, () => console.log(`failover-proxy listening on :${PORT}`));
