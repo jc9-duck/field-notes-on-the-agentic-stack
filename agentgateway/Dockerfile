@@ -23,16 +23,17 @@ RUN case "$(uname -m)" in \
     esac \
     && rustup target add "$MUSL_TARGET" \
     && apt-get update && apt-get install -y --no-install-recommends musl-tools \
-    && cargo install --locked switchyard-server --target "$MUSL_TARGET"
+    && cargo install --locked switchyard-server --version 0.3.0 --target "$MUSL_TARGET"
 
 FROM node:22-slim
 
 # Pi baked into the image so you're not reinstalling on every container start.
 # --ignore-scripts: disable install-time lifecycle scripts pi doesn't need.
-RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent
-
-# Ensure pi and its packages are up to date during image build
-RUN pi update --extensions
+# Pinned per the repo's version-pinning convention — `pi update --extensions`
+# used to sit here to catch drift, but versioned specs are skipped by package
+# updates anyway (pi's own packages.md), so it was a no-op once everything
+# below is pinned too.
+RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent@0.87.1
 
 # Bake in non-package settings (theme, defaults, retry, etc.) first — the
 # `pi install` lines below append their `packages` entries onto this same
@@ -42,11 +43,11 @@ COPY pi-settings.json /root/.pi/agent/settings.json
 # Pi extensions/packages install to /root/.pi/agent, which isn't a volume —
 # `pi install` run inside a container is lost on `--rm`. Bake wanted
 # extensions in here instead so they survive every run. Add one `pi install`
-# line per package.
-RUN pi install npm:pi-web-access
-RUN pi install npm:pi-powerline-footer
-RUN pi install npm:pi-mcp-adapter
-RUN pi install npm:pi-subagents
+# line per package, version-pinned per the repo's convention.
+RUN pi install npm:pi-web-access@0.31.0
+RUN pi install npm:pi-powerline-footer@0.17.2
+RUN pi install npm:pi-mcp-adapter@2.37.0
+RUN pi install npm:pi-subagents@0.71.0
 # AWS CLI in the image too — useful for `aws sts get-caller-identity` sanity
 # checks and, later, for pulling secrets from Secrets Manager/SSM.
 #
