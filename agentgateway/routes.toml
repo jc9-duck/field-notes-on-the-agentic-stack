@@ -29,6 +29,12 @@ max_retries = 6
 [llm_clients.ollama]
 format = "openai_chat"
 base_url = "http://host.docker.internal:11434/v1"
+# Deadline for the whole request (all retries + full streamed response), per
+# switchyard-server's toml_schema.md. Unset (the prior state) means no
+# deadline at all -- a stalled/interrupted local generation just hangs
+# instead of failing cleanly with a 504. 60s is generous enough for a real
+# qwen2.5:14b answer on this hardware, short enough to not sit forever.
+timeout_ms = 60000
 
 [llm_clients.bedrock]
 # bedrock-runtime's OpenAI-compatible Chat Completions surface. Confirmed
@@ -177,16 +183,24 @@ llm_client = "bedrock"
 # cloud NVIDIA model.
 #
 # weak_target diverges from mcp/'s routes.toml here: llama3.1:8b (targets.local)
-# was fine in mcp/'s much smaller tool surface (3 servers), but confirmed live
-# in agentgateway/ -- where pi's system prompt carries all ~60 multiplexed MCP
-# tools' schemas on every call -- to produce garbled, off-topic answers even to
-# trivial prompts ("what is 2+2?"), not from a routing bug but from an 8B model
-# losing coherence under that much tool-schema noise (prompt_tokens jumped from
-# ~17 with no MCP tools to ~2050 with the gateway connected). targets.local-big
-# (qwen2.5:14b, still free/local) stays coherent with the same tool schema
-# load. classifier_target stays "local": the classifier's own judgment call
-# doesn't carry pi's tool schemas (confirmed ~924 prompt tokens either way), so
-# the tiny model is still the right, cheap choice for that specific call.
+# gave garbled, off-topic answers even to trivial prompts ("what is 2+2?") once
+# agentgateway's ~60 multiplexed MCP tool schemas were on every call. This was
+# NOT the model losing coherence under tool-schema noise (that's what the
+# prompt_tokens ~2050 figure looked like at first) -- it's the host Ollama
+# server truncating every request to its default 2048-token context window,
+# silently dropping the head of the prompt (pi's system prompt + tool
+# schemas) regardless of the tool surface's real size. targets.local-big
+# (qwen2.5:14b) merely tolerates the truncated/garbled input better, it isn't
+# actually seeing the full ~8.6k-token prompt either. classifier_target stays
+# "local": the classifier's own judgment call is ~924-1.1k prompt tokens,
+# under the 2048 ceiling either way, so it was never affected by this.
+# Fix (host-side, not in this repo): set OLLAMA_CONTEXT_LENGTH=16384 in
+# ~/Library/LaunchAgents/homebrew.mxcl.ollama.plist and restart the ollama
+# service -- applies to every folder in this repo that talks to local Ollama
+# (model-router/, mcp/, agentgateway/), not just this route. Once applied and
+# verified, weak_target here may be able to go back to "local" like mcp/'s
+# routes.toml. Not yet applied/verified as of this comment -- re-test before
+# changing weak_target.
 [routes.smart]
 id = "switchyard"
 type = "llm_classifier"
@@ -195,6 +209,15 @@ classifier_target = "local"
 weak_target = "local-big"
 strong_target = "cloud"
 base_threshold = 0.5
+# Default is "json_schema" (strict, schema-constrained decoding). Ollama's
+# OpenAI-compat layer enforcing that on a streaming completion is the
+# suspected root cause of the classifier's judge replies coming back
+# truncated ("EOF while parsing a string" -- one raw character then nothing)
+# and switchyard falling through with confidence 0. switchyard-server's own
+# docs call out "json_object" as the fix for limited providers; Ollama
+# qualifies. Not yet confirmed as the fix -- verify against logs after this
+# lands.
+response_format_type = "json_object"
 
 # Task-type-aware route: a 3-way custom classifier, not the weak/strong
 # binary escalation routes.smart above does. Same judge model (local,
@@ -209,47 +232,62 @@ base_threshold = 0.5
 # (jsonptr) into that verdict telling Switchyard which field names the
 # chosen target; a missing/unrecognized value falls back to
 # `default_target` rather than erroring the request.
-[routes.smart-v2]
-id = "switchyard-v2"
-type = "llm_classifier"
-mode = "custom"
-classifier_target = "local"
-targets = ["local", "coding", "cloud"]
-default_target = "local"
-prompt = """
-Classify the user's most recent request into exactly one category:
-- "local": simple conversational requests, greetings, or short factual
-  lookups that need no code and no multi-step reasoning.
-- "coding": requests to write, debug, review, or explain source code in
-  any programming language.
-- "cloud": requests that need deep multi-step reasoning, mathematical
-  proof, research synthesis, or complex analysis beyond simple recall.
-Return JSON matching the response schema supplied with the request.
-"""
-response_schema = '''
-{
-  "type": "object",
-  "properties": {
-    "decision": {
-      "type": "object",
-      "properties": {
-        "target": {
-          "type": "string",
-          "enum": ["local", "coding", "cloud"]
-        }
-      },
-      "required": ["target"],
-      "additionalProperties": false
-    }
-  },
-  "required": ["decision"],
-  "additionalProperties": false
-}
-'''
-
-[routes.smart-v2.policy]
-type = "target_selector"
-selector = "/decision/target"
+# DISABLED as of the switchyard-server 0.2.0 -> 0.3.0 bump: custom mode's
+# schema changed underneath this config. The flat `targets = [...]` list
+# used here no longer exists -- 0.3.0 wants `models.any` (every selectable
+# completion target) plus `models.judge` (one or more ordered judge
+# candidates) plus named groups a verdict can select, and NVIDIA's own docs
+# don't publish a full worked example of that shape. Rather than guess at
+# the new grouping/fallback semantics and risk a config that parses but
+# routes wrong, this route is commented out so switchyard-server can start
+# at all -- its parse error was blocking every route in this file, not just
+# this one. routes.smart (capability mode, above) is unaffected: its schema
+# (weak_target/strong_target) didn't change. Migrate this properly as a
+# follow-up once the new custom-mode shape is confirmed against a real
+# example, not just the field reference.
+#
+# [routes.smart-v2]
+# id = "switchyard-v2"
+# type = "llm_classifier"
+# mode = "custom"
+# classifier_target = "local"
+# targets = ["local", "coding", "cloud"]
+# default_target = "local"
+# response_format_type = "json_object"
+# prompt = """
+# Classify the user's most recent request into exactly one category:
+# - "local": simple conversational requests, greetings, or short factual
+#   lookups that need no code and no multi-step reasoning.
+# - "coding": requests to write, debug, review, or explain source code in
+#   any programming language.
+# - "cloud": requests that need deep multi-step reasoning, mathematical
+#   proof, research synthesis, or complex analysis beyond simple recall.
+# Return JSON matching the response schema supplied with the request.
+# """
+# response_schema = '''
+# {
+#   "type": "object",
+#   "properties": {
+#     "decision": {
+#       "type": "object",
+#       "properties": {
+#         "target": {
+#           "type": "string",
+#           "enum": ["local", "coding", "cloud"]
+#         }
+#       },
+#       "required": ["target"],
+#       "additionalProperties": false
+#     }
+#   },
+#   "required": ["decision"],
+#   "additionalProperties": false
+# }
+# '''
+#
+# [routes.smart-v2.policy]
+# type = "target_selector"
+# selector = "/decision/target"
 
 # Manual-test routes: bypass the classifier and hit one provider directly
 # through Switchyard. Useful for curl-ing each leg in isolation, and for

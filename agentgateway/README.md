@@ -110,6 +110,22 @@ These ports are deliberately different from `mcp/`'s own (`5000`/`5321`/`5322`/
 a port collision — same reasoning `mcp/` already used when it shifted its own
 ports away from `model-router/`'s.
 
+### Host gotcha: Ollama silently truncates to 2048 tokens
+
+Local Ollama (`llm_clients.ollama` in `routes.toml`) truncates every request
+to its default 2048-token context window regardless of the loaded model's
+real context size — confirmed with an ~8k-token request that came back
+`prompt_tokens: 2050`, dropping the *head* of the prompt (pi's system prompt
++ tool schemas) rather than erroring. This looks like "the model can't
+handle this many tools," but it's a host Ollama config gap, not a model or
+gateway problem — it affects every folder in this repo that talks to local
+Ollama (`model-router/`, `mcp/`, `agentgateway/`), not just this one. Fix:
+add `OLLAMA_CONTEXT_LENGTH=16384` to `~/Library/LaunchAgents/homebrew.mxcl.ollama.plist`'s
+`EnvironmentVariables` and `brew services restart ollama` (raises the KV
+cache's RAM footprint — `OLLAMA_KV_CACHE_TYPE=q8_0` and flash attention are
+already set to offset that). This is a one-time host change, not something
+`docker compose up` can do for you.
+
 ### Proving the restriction visually, via MCP Inspector
 
 ```bash
