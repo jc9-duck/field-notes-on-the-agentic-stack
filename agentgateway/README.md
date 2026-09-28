@@ -120,11 +120,29 @@ real context size — confirmed with an ~8k-token request that came back
 handle this many tools," but it's a host Ollama config gap, not a model or
 gateway problem — it affects every folder in this repo that talks to local
 Ollama (`model-router/`, `mcp/`, `agentgateway/`), not just this one. Fix:
-add `OLLAMA_CONTEXT_LENGTH=16384` to `~/Library/LaunchAgents/homebrew.mxcl.ollama.plist`'s
-`EnvironmentVariables` and `brew services restart ollama` (raises the KV
-cache's RAM footprint — `OLLAMA_KV_CACHE_TYPE=q8_0` and flash attention are
-already set to offset that). This is a one-time host change, not something
-`docker compose up` can do for you.
+set `OLLAMA_CONTEXT_LENGTH=16384` (raises the KV cache's RAM footprint —
+`OLLAMA_KV_CACHE_TYPE=q8_0` and flash attention are already set to offset
+that). This is a one-time host change, not something `docker compose up`
+can do for you — **and don't hand-edit the ollama LaunchAgent plist
+directly**: on Homebrew 7.0.6+, `brew services restart` regenerates that
+plist from the formula's template on every run (it even renamed the
+service from `homebrew.mxcl.ollama` to `sh.brew.ollama` along the way),
+silently discarding manual edits. Use Homebrew's actual persistence
+mechanism instead — `~/.homebrew/services/ollama.env`
+(`$HOMEBREW_USER_CONFIG_HOME/services/<formula>.env`; see `brew services
+--help`), one `KEY=value` per line:
+
+```
+OLLAMA_FLASH_ATTENTION=1
+OLLAMA_KV_CACHE_TYPE=q8_0
+OLLAMA_MAX_LOADED_MODELS=2
+OLLAMA_CONTEXT_LENGTH=16384
+```
+
+then `brew services restart ollama`. Verified on this host: `ollama ps`'s
+`CONTEXT` column went from `2048`/`4096` to `16384`, and the diagnostic
+8k-token request's `prompt_tokens` went from the truncated `2050` to the
+full `8194`.
 
 ### Exposing curated tools to pi (`.mcp.json` `directTools`)
 
