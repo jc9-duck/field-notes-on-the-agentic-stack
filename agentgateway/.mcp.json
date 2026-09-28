@@ -2,7 +2,21 @@
   "mcpServers": {
     "gateway": {
       "type": "http",
-      "url": "http://agentgateway:4000/mcp"
+      "url": "http://agentgateway:4000/mcp",
+      "directTools": [
+        "math_add",
+        "math_subtract",
+        "math_multiply",
+        "math_divide",
+        "docs_read",
+        "github_get_me",
+        "github_search_repositories",
+        "github_get_file_contents",
+        "github_list_commits",
+        "github_list_issues",
+        "github_list_pull_requests",
+        "github_search_code"
+      ]
     }
   }
 }

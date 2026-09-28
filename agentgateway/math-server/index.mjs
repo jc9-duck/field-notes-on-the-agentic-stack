@@ -13,6 +13,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
 import { z } from "zod";
+import { logCall } from "./log-call.mjs";
 
 function buildServer() {
   const server = new McpServer({ name: "math-server", version: "1.0.0" });
@@ -21,7 +22,12 @@ function buildServer() {
     server.registerTool(
       name,
       { description: `${name} two numbers`, inputSchema: { a: z.number(), b: z.number() } },
-      async ({ a, b }) => ({ content: [{ type: "text", text: String(fn(a, b)) }] }),
+      async ({ a, b }) => {
+        const start = performance.now();
+        const text = String(fn(a, b));
+        await logCall("math", name, { a, b }, { durationMs: performance.now() - start, result: text });
+        return { content: [{ type: "text", text }] };
+      },
     );
 
   binaryOp("add", (a, b) => a + b);
@@ -31,8 +37,14 @@ function buildServer() {
     "divide",
     { description: "divide two numbers", inputSchema: { a: z.number(), b: z.number() } },
     async ({ a, b }) => {
-      if (b === 0) return { content: [{ type: "text", text: "error: division by zero" }], isError: true };
-      return { content: [{ type: "text", text: String(a / b) }] };
+      const start = performance.now();
+      if (b === 0) {
+        await logCall("math", "divide", { a, b }, { durationMs: performance.now() - start, isError: true, result: "division by zero" });
+        return { content: [{ type: "text", text: "error: division by zero" }], isError: true };
+      }
+      const text = String(a / b);
+      await logCall("math", "divide", { a, b }, { durationMs: performance.now() - start, result: text });
+      return { content: [{ type: "text", text }] };
     },
   );
 

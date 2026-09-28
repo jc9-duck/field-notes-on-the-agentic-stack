@@ -76,16 +76,19 @@ Same Docker Desktop/Colima notes as `pi-multi-provider/` above.
 
 [agentgateway](https://agentgateway.dev/) multiplexing two example MCP servers behind
 one endpoint, with tool-level access control (the gateway exposes only `read` from a
-server that genuinely also implements `write`/`delete`). Identity (JWT via AWS Cognito,
-built to be provider-swappable) is designed but deliberately deferred to its own
-follow-up step rather than baked in upfront — see `agentgateway/README.md`.
+server that genuinely also implements `write`/`delete`). Also carries `mcp/`'s full
+switchyard stack (dynamic LLM routing, failover chain, request tracing,
+Prometheus/Grafana), on its own shifted port range so both folders can run at once —
+this is now the series' combined MCP-gateway-plus-model-routing folder. Identity (JWT
+via AWS Cognito, built to be provider-swappable) is designed but deliberately deferred
+to its own follow-up step rather than baked in upfront — see `agentgateway/README.md`.
 
 Quickstart:
 ```bash
 cd agentgateway
-cp .env.example .env   # fill in pi's provider keys
-docker compose build
-docker compose up -d math-server docs-server agentgateway
+cp .env.example .env   # fill in pi's provider keys, plus GH_TOKEN for the live github target
+export GH_TOKEN=$(gh auth token)
+./dev.sh                # always rebuilds first, brings up math/docs/gateway, then runs pi
 
 # Optional: browse the before/after restriction visually instead of via curl
 docker compose up -d mcp-inspector   # open http://localhost:6274 (URL w/ token printed in logs)
