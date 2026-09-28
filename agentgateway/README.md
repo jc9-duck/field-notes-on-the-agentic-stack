@@ -3,8 +3,8 @@
 **Iteration 1 of a staged build.** This folder is built up step by step, each step its
 own commit and its own documented/demoed piece, rather than shipped fully-wired upfront
 — see "What's still coming" at the bottom. Right now: [agentgateway](https://agentgateway.dev/)
-(Linux Foundation, Rust, MCP multiplexer) sitting in front of six MCP servers — two
-hand-built, four genuinely live/external — proving it can (1) federate multiple
+(Linux Foundation, Rust, MCP multiplexer) sitting in front of four MCP servers — two
+hand-built, two genuinely live/external — proving it can (1) federate multiple
 backends behind one endpoint, real third-party servers included, and (2) restrict which
 tools a client sees per-backend, independent of what the backend actually implements.
 No identity, no guardrails, no request tracing, and no credentialed backends yet — this
@@ -43,13 +43,15 @@ without colliding — see "Dynamic model routing" below.
   AWS included. A working stdio→HTTP bridge for it was built and evaluated, and is
   recoverable from git history whenever a credentialed-backend step becomes its own
   documented iteration, same treatment as identity below.)
-- `deepwiki` — DeepWiki's public MCP server (`mcp.deepwiki.com`), AI-generated Q&A over
-  any public GitHub repo, genuinely credential-free.
-- `context7` — Context7's public MCP server (`mcp.context7.com`), up-to-date
-  library/framework documentation, usable with no API key (a free key from
-  `context7.com/dashboard` only raises rate limits, never required).
 - `config.yaml` — agentgateway's config (plain static file, no identity/JWT
-  requirement right now — see "Identity" below).
+  requirement right now — see "Identity" below). Two more genuinely free,
+  no-signup public servers — `deepwiki` (`mcp.deepwiki.com`) and `context7`
+  (`mcp.context7.com`) — were multiplexed here too, but pulled back out to
+  keep this iteration's active target list consistent with the
+  `.mcp.json`/`AGENTS.md` tool-routing work landing alongside this change
+  (which currently only curates math/docs/github tools). Not lost — both
+  are intact in git history, ready to come back as their own documented
+  step once tool-routing coverage catches up to them.
 
 **Identity/JWT auth is deliberately not wired in yet.** An earlier pass built full
 AWS Cognito-backed JWT auth (provider-agnostic, swappable identity providers) for this
@@ -238,9 +240,9 @@ docker compose run --rm pi
 
 ### Proving the live external servers
 
-Same session as above. `tools/list` returns 59 tools: 4 math + 1 docs + ~45 github +
-5 aws-knowledge + 3 deepwiki + 2 context7 (GitHub's own count varies with the token's
-scopes) — no auth required for any of it beyond GitHub's own `GH_TOKEN`.
+Same session as above. `tools/list` returns ~55 tools: 4 math + 1 docs + ~45 github +
+5 aws-knowledge (GitHub's own count varies with the token's scopes) — no auth required
+for any of it beyond GitHub's own `GH_TOKEN`.
 
 ```bash
 # Real GitHub profile data, via agentgateway's injected token -- pi never sees GH_TOKEN
@@ -252,16 +254,6 @@ curl -s http://localhost:4000/mcp -H "mcp-session-id: $SESSION" \
 curl -s http://localhost:4000/mcp -H "mcp-session-id: $SESSION" \
   -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
   -d '{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"aws-knowledge_aws___search_documentation","arguments":{"search_phrase":"S3 bucket versioning"}}}'
-
-# Real repo documentation structure from DeepWiki, no credentials
-curl -s http://localhost:4000/mcp -H "mcp-session-id: $SESSION" \
-  -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
-  -d '{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"deepwiki_read_wiki_structure","arguments":{"repoName":"facebook/react"}}}'
-
-# Real library docs lookup from Context7, no API key
-curl -s http://localhost:4000/mcp -H "mcp-session-id: $SESSION" \
-  -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
-  -d '{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"context7_resolve-library-id","arguments":{"query":"react hooks","libraryName":"react"}}}'
 ```
 
 ## What's still coming

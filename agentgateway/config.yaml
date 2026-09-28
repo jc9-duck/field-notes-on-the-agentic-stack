@@ -71,22 +71,16 @@ mcp:
         # are intact in git history (this branch, before the removal commit)
         # for whenever a credentialed-backend step is deliberately taken as
         # its own documented iteration, same treatment as identity above.
-    # Two more genuinely free, no-signup public servers, same bar as
-    # aws-knowledge above.
-    - name: deepwiki
-      mcp:
-        # DeepWiki (Devin/Cognition) -- AI-generated Q&A over public GitHub
-        # repos. Confirmed live, zero auth: a bare `initialize` call
-        # returns HTTP 200 with no Authorization header at all.
-        host: https://mcp.deepwiki.com/mcp
-    - name: context7
-      mcp:
-        # Context7 (Upstash) -- up-to-date library/framework documentation.
-        # Confirmed live with no API key (basic rate limits apply without
-        # one; a free key from context7.com/dashboard raises them, but
-        # isn't required -- matches the same "no signup needed" bar as
-        # aws-knowledge/deepwiki above, so no backendAuth key configured).
-        host: https://mcp.context7.com/mcp
+    # deepwiki and context7 (two more genuinely free, no-signup public
+    # servers, same bar as aws-knowledge above) were multiplexed here too,
+    # but pulled back out to keep this iteration's active target list
+    # consistent with the tool-routing work landing alongside this change
+    # (.mcp.json/AGENTS.md currently only curate math/docs/github tools --
+    # aws-knowledge was never wired into that curated list either, but it's
+    # kept here since it needs no auth, same bar as the three active
+    # targets). Not lost -- both blocks are intact in git history (this
+    # branch, before the removal commit) to bring back as their own
+    # documented step whenever tool-routing coverage catches up to them.
   policies:
     # mcp.tool.target is what makes one policy block apply differently per
     # backend within a single multiplexed endpoint: math stays fully open,
@@ -107,5 +101,3 @@ mcp:
         - allow: 'mcp.tool.target == "docs" && mcp.tool.name == "read"'
         - allow: 'mcp.tool.target == "github"'
         - allow: 'mcp.tool.target == "aws-knowledge"'
-        - allow: 'mcp.tool.target == "deepwiki"'
-        - allow: 'mcp.tool.target == "context7"'
