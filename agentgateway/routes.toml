@@ -67,10 +67,13 @@ max_retries = 2
 # system-prompt weight: real end-to-end runs showed it repeatedly latching
 # onto fragments of pi's own tool-schema text instead of answering trivial
 # questions ("say hi", "capital of France"), both as the served model and
-# as the classifier itself (classifier_target below reuses this target).
-# llama3.1:8b is a real instruction-tuned model, already pulled on the host
-# — swapped in to see if actual instruction-following capacity, not routing
-# logic, was the missing piece.
+# as [routes.smart]'s classifier (classifier_target pointed here at the
+# time). llama3.1:8b is a real instruction-tuned model, already pulled on
+# the host — swapped in to see if actual instruction-following capacity,
+# not routing logic, was the missing piece. classifier_target has since
+# moved off this target entirely (see [routes.smart]'s comment) after
+# llama3.1:8b turned out to still be unreliable at schema-conforming judge
+# output even once instruction-following itself was fine.
 id = "llama3.1:8b"
 llm_client = "ollama"
 
@@ -216,22 +219,57 @@ llm_client = "bedrock"
 # on this Mac even with the full prompt reaching it. Revisit if $0/local
 # is worth trading for that latency, or if a faster local model replaces
 # qwen2.5:14b as local-big.
+#
+# classifier_target moved local -> qwen-coder. This is a *different* bug
+# from the truncation above: even at the correct 2048-token size (the
+# classifier's own prompt is only ~924-1.1k tokens, always under the
+# ceiling, truncation-fix or not), llama3.1:8b frequently failed to return
+# a schema-conforming verdict -- echoing the JSON Schema itself back instead
+# of an instance, wrong types (`"p_solve":"0.0"` or `null`), or an empty
+# `{}`. Measured live: 6 of 10 requests hit switchyard's `reason="parse_error"`
+# fall-through. Two Bedrock alternatives were measured head-to-head (same
+# method, 10 requests each, judge_model in .switchyard.log) before picking
+# one, rather than assuming "any Bedrock model is smart enough": gpt-oss-20b
+# (bedrock-gptoss) was tried first as the more "lightweight/cheap" judge
+# option, but scored *worse* -- 29 parse_errors across 10 requests and
+# 15-30s/call -- while qwen-coder (already proven as weak_target) came back
+# clean at 0/10 parse_errors, 3-11s/call. Reusing qwen-coder for both roles
+# is fine -- classifier and weak/strong-target calls are separate prompts,
+# no interaction between them.
+#
+# strong_target moved cloud (NVIDIA nemotron-3-nano) -> bedrock-glm. Live
+# session logs (failover.jsonl) showed `cloud` hitting NVIDIA's
+# `ResourceExhausted` on nearly every escalation, with the reported
+# concurrency figure swinging wildly (16/16, then 4732/16, then 1630/16 in
+# the same short session) -- not a steady climb, so not a connection leak on
+# this proxy's side (Step 4's abort-on-disconnect fix is doing its job; see
+# failover-proxy.mjs). It looks like contention on NVIDIA's shared/free NIM
+# community tier, outside this repo's control. The Step-4 failover already
+# recovered every single time (always landed on qwen-coder with a 200), but
+# every strong-routed request was paying for a doomed-most-of-the-time
+# NVIDIA attempt first. bedrock-glm scored 9/9 correct in the 5-route eval
+# at ~9s/call, so it's now the default escalation target instead.
+# `targets.cloud` (NVIDIA) is untouched and still directly selectable
+# (`--model cloud`) so that leg of the multi-provider story is still
+# demonstrable on demand -- just monitor whether it still misbehaves when
+# explicitly invoked, since moving the *default* path off it doesn't fix
+# NVIDIA's own capacity.
 [routes.smart]
 id = "switchyard"
 type = "llm_classifier"
 mode = "capability"
-classifier_target = "local"
+classifier_target = "qwen-coder"
 weak_target = "qwen-coder"
-strong_target = "cloud"
+strong_target = "bedrock-glm"
 base_threshold = 0.5
-# Default is "json_schema" (strict, schema-constrained decoding). Ollama's
-# OpenAI-compat layer enforcing that on a streaming completion is the
-# suspected root cause of the classifier's judge replies coming back
-# truncated ("EOF while parsing a string" -- one raw character then nothing)
-# and switchyard falling through with confidence 0. switchyard-server's own
-# docs call out "json_object" as the fix for limited providers; Ollama
-# qualifies. Not yet confirmed as the fix -- verify against logs after this
-# lands.
+# Default is "json_schema" (strict, schema-constrained decoding); forced to
+# "json_object" here. Originally added suspecting Ollama's OpenAI-compat
+# layer couldn't handle strict json_schema on a streaming completion --
+# that hypothesis is now moot since classifier_target is Bedrock, not
+# Ollama, and the measurement above shows qwen-coder is reliable with
+# json_object as configured. Not re-tested against the stricter default
+# now that the target changed; leaving as-is since it's already working
+# (0/10 parse_errors) rather than introducing an untested variable.
 response_format_type = "json_object"
 
 # Task-type-aware route: a 3-way custom classifier, not the weak/strong
