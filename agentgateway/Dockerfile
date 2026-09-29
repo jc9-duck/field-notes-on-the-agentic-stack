@@ -33,7 +33,7 @@ FROM node:22-slim
 # used to sit here to catch drift, but versioned specs are skipped by package
 # updates anyway (pi's own packages.md), so it was a no-op once everything
 # below is pinned too.
-RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent@0.87.1
+RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent@0.99.0
 
 # Bake in non-package settings (theme, defaults, retry, etc.) first — the
 # `pi install` lines below append their `packages` entries onto this same
