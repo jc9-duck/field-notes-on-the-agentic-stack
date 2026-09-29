@@ -6,6 +6,23 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+# `docker compose build` fails with a confusing "Cannot connect to the Docker
+# daemon" error if the Colima VM isn't running -- start it (or fail clearly)
+# up front so that's the error you see, not a bare compose failure.
+if ! docker info >/dev/null 2>&1; then
+  if command -v colima >/dev/null 2>&1; then
+    echo "Docker daemon not reachable -- starting Colima..." >&2
+    colima start
+    if ! docker info >/dev/null 2>&1; then
+      echo "Colima started but the Docker daemon still isn't reachable. Check 'colima status'." >&2
+      exit 1
+    fi
+  else
+    echo "Docker daemon not reachable and 'colima' isn't installed. Start your Docker runtime and retry." >&2
+    exit 1
+  fi
+fi
+
 docker compose build
 # --service-ports: `docker compose run` does NOT publish the `ports:`
 # section by default (unlike `docker compose up`) -- without this flag,
