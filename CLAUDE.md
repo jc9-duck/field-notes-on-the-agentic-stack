@@ -97,7 +97,7 @@ its own build step, and there's no linter configured anywhere in the repo.
 - `gitleaks` runs as a **pre-commit hook**, but it's opt-in per clone:
   `git config core.hooksPath .githooks` (see `.githooks/pre-commit`). It is not active by
   default after a plain clone.
-- `.github/workflows/security-scan.yml` runs `gitleaks` on every push/PR to `master`
+- `.github/workflows/security-scan.yml` runs `gitleaks` on every push/PR to `main`
   regardless, plus a Trivy image-vulnerability scan (report-only, `exit-code: 0`) across
   the `pi-multi-provider`, `model-router`, `mcp` Docker images — `agentgateway/` is not
   currently in that scan matrix.
