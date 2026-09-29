@@ -44,10 +44,10 @@ COPY pi-settings.json /root/.pi/agent/settings.json
 # `pi install` run inside a container is lost on `--rm`. Bake wanted
 # extensions in here instead so they survive every run. Add one `pi install`
 # line per package, version-pinned per the repo's convention.
-RUN pi install npm:pi-web-access@0.31.0
+RUN pi install npm:pi-web-access@0.32.0
 RUN pi install npm:pi-powerline-footer@0.17.2
 RUN pi install npm:pi-mcp-adapter@2.37.0
-RUN pi install npm:pi-subagents@0.71.0
+RUN pi install npm:pi-subagents@0.72.0
 # AWS CLI in the image too — useful for `aws sts get-caller-identity` sanity
 # checks and, later, for pulling secrets from Secrets Manager/SSM.
 #
