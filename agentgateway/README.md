@@ -170,7 +170,9 @@ required) telling the model which of those curated tools to prefer over
 ### Proving the restriction visually, via MCP Inspector
 
 ```bash
-docker compose up -d mcp-inspector   # open http://localhost:6274 (URL w/ token printed in logs)
+docker compose up -d mcp-inspector   # open http://localhost:7274 (URL w/ token printed in logs)
+# 7274, not mcp/'s 6274 -- same reason as switchyard's 5xxx->6xxx shift:
+# both folders' Inspector can run at the same time without a port collision.
 ```
 
 1. Connect Inspector to `http://localhost:3102/mcp` (raw `docs-server`, published

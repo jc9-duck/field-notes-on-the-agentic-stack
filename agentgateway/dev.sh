@@ -8,11 +8,13 @@ cd "$(dirname "$0")"
 
 docker compose build
 # Brought up explicitly (not just via pi's depends_on) so docs-server's
-# published port (3002, for the raw-vs-gated Inspector demo -- see README)
-# and agentgateway's own port (4000) are both up before pi ever connects.
-docker compose up -d math-server docs-server agentgateway
-# --service-ports doesn't currently do anything here -- pi has no ports: of
-# its own in this folder (unlike mcp/'s pi, which bundles switchyard/trace
-# viewers) -- but it costs nothing and avoids the same silent-port gotcha if
-# one is ever added.
+# published port (3102, for the raw-vs-gated Inspector demo -- see README),
+# agentgateway's own ports (4000 MCP proxy, 15000 admin UI), and
+# mcp-inspector (7274/7275/7278) are all up before pi ever connects --
+# mcp-inspector isn't a dependency of pi, so it's never started otherwise.
+docker compose up -d math-server docs-server agentgateway mcp-inspector
+# --service-ports *is* needed here: pi's own ports: block (switchyard-server
+# on 6000, trace-server.mjs on 6321, mcp-trace-server.mjs on 6322,
+# failover-proxy.mjs on 6100) is silently dropped by `docker compose run`
+# without this flag -- the same gotcha documented in the repo's CLAUDE.md.
 exec docker compose run --rm --service-ports pi

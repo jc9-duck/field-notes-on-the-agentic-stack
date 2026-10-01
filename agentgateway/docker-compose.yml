@@ -3,7 +3,13 @@ services:
   # unrestricted tool set, then at agentgateway's /mcp URL to see the same
   # backend with docs_write/docs_delete filtered out -- the actual
   # before/after proof this folder exists to make, side by side in one UI
-  # instead of curl. Same pinned version/ports as mcp/'s copy of this service.
+  # instead of curl. Same pinned version as mcp/'s copy of this service, but
+  # published on 7xxx instead of mcp/'s 6xxx -- same reason as switchyard's
+  # 5xxx->6xxx shift (see entrypoint.sh comments): both folders' Inspector
+  # can then run at the same time without a port collision. Only the
+  # host-side mapping shifts; CLIENT_PORT etc. below (what Inspector binds
+  # to *inside* the container) are untouched, same pattern as docs-server's
+  # "3102:3002".
   mcp-inspector:
     image: node:22-slim
     working_dir: /work
@@ -15,9 +21,9 @@ services:
       - MCP_SANDBOX_PORT=6275
       - MCP_APP_ORIGIN_PORT=6278
     ports:
-      - "6274:6274"   # main web UI -- open this one in a browser
-      - "6275:6275"   # MCP Apps sandbox iframe
-      - "6278:6278"   # MCP Apps origin (only used by servers declaring _meta.ui.domain)
+      - "7274:6274"   # main web UI -- open this one in a browser
+      - "7275:6275"   # MCP Apps sandbox iframe
+      - "7278:6278"   # MCP Apps origin (only used by servers declaring _meta.ui.domain)
 
   math-server:
     build: ./math-server
@@ -77,17 +83,27 @@ services:
       # source as every other folder in this repo: `export GH_TOKEN=$(gh
       # auth token)` on the host before `docker compose up`.
       - GH_TOKEN=${GH_TOKEN:-}
+      # agentgateway's admin UI binds 127.0.0.1:15000 by default (confirmed
+      # via its own startup log and crates/agentgateway/src/config.rs at
+      # v1.5.0) -- loopback-only *inside* the container, so publishing 15000
+      # alone would never reach it. ADMIN_ADDR overrides the bind address;
+      # 0.0.0.0 makes it reachable through the published port below. Port
+      # 4000 (bind/4000 in the startup log) is the MCP proxy only -- it was
+      # never serving the UI despite an earlier comment here claiming
+      # localhost:4000/ui worked.
+      - ADMIN_ADDR=0.0.0.0:15000
     command: ["-f", "/config/config.yaml"]
     ports:
       # The one endpoint clients talk to — multiplexes math-server and
-      # docs-server behind /mcp. Also serves the admin UI at
-      # http://localhost:4000/ui (agentgateway's actual admin port, 15000,
-      # isn't published — reachable only through this same port). Published
-      # to the host (not just compose-internal) so other folders' pi
-      # containers (e.g. mcp/) can reach it via host.docker.internal:4000 —
-      # agentgateway/ and mcp/ are separate compose projects, per this
-      # repo's one-folder-per-topic convention.
+      # docs-server behind /mcp. Published to the host (not just
+      # compose-internal) so other folders' pi containers (e.g. mcp/) can
+      # reach it via host.docker.internal:4000 — agentgateway/ and mcp/ are
+      # separate compose projects, per this repo's one-folder-per-topic
+      # convention.
       - "4000:4000"
+      # Admin UI -- see ADMIN_ADDR above for why this needs that env var to
+      # actually be reachable, not just published here.
+      - "15000:15000"
 
   # Consistent with every other folder in this series (pi-multi-provider/,
   # mcp/, model-router/): pi is the client demonstrating the thing this
