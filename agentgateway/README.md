@@ -169,20 +169,31 @@ required) telling the model which of those curated tools to prefer over
 
 ### Proving the restriction visually, via MCP Inspector
 
+Two separate Inspector instances, each already connected to one side of the
+comparison — open both tabs side by side rather than re-pointing one Inspector
+back and forth:
+
 ```bash
-docker compose up -d mcp-inspector   # open http://localhost:7274 (URL w/ token printed in logs)
-# 7274, not mcp/'s 6274 -- same reason as switchyard's 5xxx->6xxx shift:
-# both folders' Inspector can run at the same time without a port collision.
+docker compose up -d mcp-inspector-docs-server mcp-inspector-gateway
 ```
 
-1. Connect Inspector to `http://localhost:3102/mcp` (raw `docs-server`, published
-   directly to the host). `tools/list` shows `read`, `write`, `delete`. Call `write`
-   or `delete` — both succeed, mutating real files under
-   `docs-server/sample-docs/`.
-2. Point the same Inspector at `http://localhost:4000/mcp` (`agentgateway`).
-   `tools/list` shows `docs_read` but **not** `docs_write`/`docs_delete` — the CEL
-   policy filters `tools/list` itself, not just enforcement. Calling `docs_read`
-   succeeds; calling `docs_delete` by name returns `Unknown tool: docs_delete`.
+- **Raw `docs-server`:** <http://localhost:7274/?serverUrl=http%3A%2F%2Fdocs-server%3A3002%2Fmcp&transport=http&autoConnect=agentgateway-demo>
+  `tools/list` shows `read`, `write`, `delete`. Call `write` or `delete` — both
+  succeed, mutating real files under `docs-server/sample-docs/`.
+- **Via `agentgateway`:** <http://localhost:7284/?serverUrl=http%3A%2F%2Fagentgateway%3A4000%2Fmcp&transport=http&autoConnect=agentgateway-demo>
+  `tools/list` shows `docs_read` but **not** `docs_write`/`docs_delete` (plus the
+  math/github/aws-knowledge tools, since this endpoint multiplexes every
+  backend) — the CEL policy filters `tools/list` itself, not just enforcement.
+  Calling `docs_read` succeeds; calling `docs_delete` by name returns
+  `Unknown tool: docs_delete`.
+
+Both links auto-connect on load (Inspector's deep-link query params — `serverUrl`
++ `transport` + `autoConnect` matching `MCP_INSPECTOR_API_TOKEN` in
+docker-compose.yml) instead of needing the connect form filled in by hand. The
+`serverUrl` host (`docs-server`/`agentgateway`, not `localhost`) is deliberate:
+Inspector's backend — not your browser — makes that connection, from inside the
+compose network, so it uses the internal service name and port, not the
+host-published one.
 
 That's the whole before/after: same backend, same files, two different ports —
 one genuinely restricted, one not.

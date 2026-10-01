@@ -1,16 +1,31 @@
 services:
-  # MCP's own dev tool: point it at docs-server's raw /mcp URL to see the
-  # unrestricted tool set, then at agentgateway's /mcp URL to see the same
-  # backend with docs_write/docs_delete filtered out -- the actual
-  # before/after proof this folder exists to make, side by side in one UI
-  # instead of curl. Same pinned version as mcp/'s copy of this service, but
-  # published on 7xxx instead of mcp/'s 6xxx -- same reason as switchyard's
-  # 5xxx->6xxx shift (see entrypoint.sh comments): both folders' Inspector
-  # can then run at the same time without a port collision. Only the
-  # host-side mapping shifts; CLIENT_PORT etc. below (what Inspector binds
-  # to *inside* the container) are untouched, same pattern as docs-server's
-  # "3102:3002".
-  mcp-inspector:
+  # Two separate Inspector instances, not one -- so the raw docs-server tool
+  # list (read/write/delete) and the gateway-filtered one (read only) are
+  # each already connected in their own tab, side by side, instead of one
+  # Inspector you manually re-point back and forth. Each one's "open this
+  # URL" link below is an Inspector deep link (serverUrl + transport +
+  # autoConnect query params -- see clients/web/src/utils/deepLink.ts in the
+  # inspector repo at this pinned version): it connects automatically on
+  # load, no manual form-filling. autoConnect must equal
+  # MCP_INSPECTOR_API_TOKEN below -- that's Inspector's CSRF gate on
+  # auto-connecting at all, not a real secret, so a fixed, obviously-a-dev-
+  # value token (rather than the random one Inspector would otherwise print
+  # per launch) is what makes the link in README.md reusable across restarts.
+  #
+  # Published on 7xxx/72xx, not mcp/'s 6274/6275/6278 -- same reason as
+  # switchyard's 5xxx->6xxx shift (see entrypoint.sh comments): both folders'
+  # Inspector can then run at the same time without a port collision. Only
+  # the host-side mapping shifts; CLIENT_PORT etc. below (what Inspector
+  # binds to *inside* each container) are untouched, same pattern as
+  # docs-server's "3102:3002".
+  #
+  # 127.0.0.1-prefixed (not a bare "7274:6274"): Inspector's own docs
+  # (docs/docker.md at this pinned version) call out that a bare publish
+  # puts the Inspector -- and the API token GET / discloses -- on the whole
+  # local network, since HOST=0.0.0.0/DANGEROUSLY_BIND_ALL_INTERFACES below
+  # only govern the *container's* interface, not the host-side publish
+  # scope. Loopback-only here is the fix they document.
+  mcp-inspector-docs-server:
     image: node:22-slim
     working_dir: /work
     command: ["npx", "-y", "@modelcontextprotocol/inspector@2.6.0"]
@@ -20,10 +35,27 @@ services:
       - CLIENT_PORT=6274
       - MCP_SANDBOX_PORT=6275
       - MCP_APP_ORIGIN_PORT=6278
+      - MCP_INSPECTOR_API_TOKEN=agentgateway-demo
     ports:
-      - "7274:6274"   # main web UI -- open this one in a browser
-      - "7275:6275"   # MCP Apps sandbox iframe
-      - "7278:6278"   # MCP Apps origin (only used by servers declaring _meta.ui.domain)
+      - "127.0.0.1:7274:6274"   # http://localhost:7274/?serverUrl=http%3A%2F%2Fdocs-server%3A3002%2Fmcp&transport=http&autoConnect=agentgateway-demo
+      - "127.0.0.1:7275:6275"   # MCP Apps sandbox iframe
+      - "127.0.0.1:7278:6278"   # MCP Apps origin (only used by servers declaring _meta.ui.domain)
+
+  mcp-inspector-gateway:
+    image: node:22-slim
+    working_dir: /work
+    command: ["npx", "-y", "@modelcontextprotocol/inspector@2.6.0"]
+    environment:
+      - HOST=0.0.0.0
+      - DANGEROUSLY_BIND_ALL_INTERFACES=true
+      - CLIENT_PORT=6274
+      - MCP_SANDBOX_PORT=6275
+      - MCP_APP_ORIGIN_PORT=6278
+      - MCP_INSPECTOR_API_TOKEN=agentgateway-demo
+    ports:
+      - "127.0.0.1:7284:6274"   # http://localhost:7284/?serverUrl=http%3A%2F%2Fagentgateway%3A4000%2Fmcp&transport=http&autoConnect=agentgateway-demo
+      - "127.0.0.1:7285:6275"   # MCP Apps sandbox iframe
+      - "127.0.0.1:7288:6278"   # MCP Apps origin (only used by servers declaring _meta.ui.domain)
 
   math-server:
     build: ./math-server
