@@ -36,6 +36,9 @@ services:
       - MCP_SANDBOX_PORT=6275
       - MCP_APP_ORIGIN_PORT=6278
       - MCP_INSPECTOR_API_TOKEN=agentgateway-demo
+      # Browser origin is the published host port (7274), not the in-container
+      # 6274 -- without this the origin allow-list 403s every API call.
+      - ALLOWED_ORIGINS=http://localhost:7274,http://127.0.0.1:7274
     ports:
       - "127.0.0.1:7274:6274"   # http://localhost:7274/?serverUrl=http%3A%2F%2Fdocs-server%3A3002%2Fmcp&transport=http&autoConnect=agentgateway-demo
       - "127.0.0.1:7275:6275"   # MCP Apps sandbox iframe
@@ -52,6 +55,7 @@ services:
       - MCP_SANDBOX_PORT=6275
       - MCP_APP_ORIGIN_PORT=6278
       - MCP_INSPECTOR_API_TOKEN=agentgateway-demo
+      - ALLOWED_ORIGINS=http://localhost:7284,http://127.0.0.1:7284
     ports:
       - "127.0.0.1:7284:6274"   # http://localhost:7284/?serverUrl=http%3A%2F%2Fagentgateway%3A4000%2Fmcp&transport=http&autoConnect=agentgateway-demo
       - "127.0.0.1:7285:6275"   # MCP Apps sandbox iframe
