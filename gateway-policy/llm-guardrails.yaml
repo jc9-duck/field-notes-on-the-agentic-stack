@@ -1,0 +1,61 @@
+  # Deterministic (regex) guardrails -- the `llm.policies` subtree, indented to nest
+  # directly under a top-level `llm:` key. Applies to every model on the LLM
+  # listener, request and response, so it covers everything pi sends through
+  # switchyard -> agentgateway. Fast, free, predictable; the LLM-judge webhook
+  # (separate step) handles what regex can't express.
+  #
+  # Findings from testing agentgateway v1.5.0 that shaped this file
+  # (see tests/test-regex-guardrails.sh for the assertions):
+  #   - Guards run top to bottom and the built-in patterns overlap: a bare
+  #     `987-65-4321` is an SSN to `ssn` but a phone number to `phoneNumber`. So
+  #     the hard-stop guards (reject) come FIRST and masking comes after.
+  #   - `ssn` also matches any bare 9-digit run (e.g. an ABA routing number).
+  #   - `creditCard` misses spaced Amex (4-6-5) and Mastercard 2-series numbers.
+  #   - `phoneNumber` is greedy: it masks part numbers (4829-1173-0056) and build
+  #     strings (2026.10.04-117), corrupting ordinary technical text. Replaced
+  #     below by a stricter custom pattern (area code + 3-3-4 only).
+  #   - KNOWN GAP: v1.5.0 does not scan role:"tool" messages at all, so PII in
+  #     tool results (GitHub/docs tool output fed back to the model) reaches the
+  #     provider. The `scope: [toolOutput]` option in the current docs is not in
+  #     the pinned v1.5.0 schema (the validator rejects it). Closing this needs a
+  #     version bump; the test pins the gap so an upgrade flags it.
+  #   - Response-side matches are always masked (reject only applies to requests).
+  policies:
+    guardrails:
+      request:
+        # 1. Hard stops: never let these reach a model provider.
+        - regex:
+            action: reject
+            rules:
+              - builtin: ssn
+              - builtin: creditCard
+              # Gaps in builtin creditCard (Rust regex: no lookaround).
+              - pattern: '\b3[47]\d{2}[ -]?\d{6}[ -]?\d{5}\b'            # Amex 4-6-5
+              - pattern: '\b2[2-7]\d{2}[ -]?\d{4}[ -]?\d{4}[ -]?\d{4}\b'  # Mastercard 2-series
+        # 2. Redact: the request still goes through, with the value replaced.
+        - regex:
+            action: mask
+            rules:
+              - builtin: email
+              # Stricter than builtin phoneNumber: requires an area code and 3-3-4
+              # digits, so versions, ports and part numbers are left alone.
+              - pattern: '(?:\+1[ .-]?)?(?:\(\d{3}\)[ .-]?|\b\d{3}[ .-])\d{3}[ .-]\d{4}\b'
+              # US street address: number + capitalised name words + street suffix.
+              - pattern: '\b\d{1,5}[A-Z]?\s+(?:[A-Z][A-Za-z]+\s+){1,3}(?:Street|St|Avenue|Ave|Road|Rd|Drive|Dr|Lane|Ln|Boulevard|Blvd|Court|Ct|Way|Place|Pl|Circle|Point)\b\.?'
+              # Bank account number, keyed on the word "account" to avoid eating
+              # arbitrary long numbers.
+              - pattern: '(?i)\baccount(?: number| no\.?)?[:# ]*\d{8,17}\b'
+              # IBAN (country code + check digits + groups of 4).
+              - pattern: '\b[A-Z]{2}\d{2}(?: ?[A-Z0-9]{4}){2,7}(?: ?[A-Z0-9]{1,3})?\b'
+      response:
+        # Don't let a model echo PII back to the client (or leak it from training
+        # or from a tool result it saw earlier).
+        - regex:
+            action: mask
+            rules:
+              - builtin: email
+              - builtin: ssn
+              - builtin: creditCard
+              - pattern: '\b3[47]\d{2}[ -]?\d{6}[ -]?\d{5}\b'
+              - pattern: '\b2[2-7]\d{2}[ -]?\d{4}[ -]?\d{4}[ -]?\d{4}\b'
+              - pattern: '(?:\+1[ .-]?)?(?:\(\d{3}\)[ .-]?|\b\d{3}[ .-])\d{3}[ .-]\d{4}\b'
