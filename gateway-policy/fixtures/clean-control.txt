@@ -1,0 +1,11 @@
+SYNTHETIC CONTROL DOCUMENT -- contains NO PII; must pass every guardrail untouched.
+Number-shaped strings below exist to catch over-eager regexes (false positives).
+
+Release notes for build 2026.10.04-117 of the demo stack.
+- agentgateway v1.5.0 and pi 0.99.0, listening on ports 4000, 4100 and 15000.
+- Latency p50 was 142 ms, p99 was 1,873 ms across 20260 requests.
+- The deploy ran from 09:30 to 10:45 on 2026-10-04 (ticket FN-2026-1004).
+- Part number 4829-1173-0056 shipped in carton 7731 of pallet 0042.
+- Ask the team in the #field-notes channel or read the docs at https://agentgateway.dev.
+
+Write a haiku about proxies.
