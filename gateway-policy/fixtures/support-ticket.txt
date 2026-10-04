@@ -1,0 +1,16 @@
+SYNTHETIC TEST DOCUMENT -- every identifier below is fictional.
+
+Subject: Charge on my card I don't recognise
+
+Hi, this is Bruce Wayne. I'm writing about a charge on my Visa ending in
+4242 4242 4242 4242 (expires 11/30). Please call me back on (212) 555-0102 or
+reply to bruce.wayne@example.com -- I'm at 1007 Mountain Drive, Faketown ZZ 00002.
+
+To verify my identity: SSN 987-65-4322, and for the refund please use my bank
+account 000123456702 with routing number 123456780 (IBAN GB82 WEST 1234 5698 7654 32).
+
+My colleague Peter Parker (peter.parker@example.com, 212-555-0101,
+SSN 987-65-4321, card 4111-1111-1111-1111) saw the same charge.
+
+Thanks,
+Bruce
