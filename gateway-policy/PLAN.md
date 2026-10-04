@@ -90,3 +90,30 @@ Scope: **pi only** (the series' agent). Claude Code / Codex etc. are a later fol
   temperature, schema-constrained output, a small curated case set).
 - Streaming responses may limit response-side guardrails (undocumented; spike).
 - Prior Bedrock key exposure in an old transcript: rotate before screenshots.
+
+## Spike results (step 0, 2026-10-04, agentgateway v1.5.0)
+Run against a mock OpenAI upstream + logging webhook; throwaway, not committed.
+- **mcp + llm coexist in one config.** Both `bind/4000` (mcp) and `bind/4100` (llm)
+  start from one file; no second instance needed. Step 4 topology stays single-gateway.
+- **`--validate-only` exists** -> usable as the CI config check (step 6).
+- **Regex:** `reject` -> HTTP 403 "The request was rejected due to inappropriate
+  content"; `mask` rewrites in place (`<EMAIL_ADDRESS>`, `<PHONE_NUMBER>`), on both
+  request and response.
+- **Order:** guards run in listed order; the webhook sees content already masked by
+  earlier regex guards.
+- **Webhook contract (observed):** `POST /request` with body
+  `{"body":{"messages":[{role,content},...]}}`, no auth header unless configured.
+  Reply `{"action":{"type":"pass"}}`; `{"action":{"type":"reject","body":"...",
+  "status_code":451,"reason":"..."}}` -> client gets that status/body;
+  `{"action":{"type":"mask","body":{"messages":[...]},"reason":"..."}}` -> upstream
+  receives the rewritten messages.
+- **Observability for free:** the request log line carries
+  `agw.ai.guardrails=[{"phase","guard","action"}]` -- source for screenshots and
+  test assertions.
+- **Config gotchas:** upstream override is `params.hostOverride` (not a model-level
+  field); `provider: openAI` model entries; guards live under
+  `llm.models[].guardrails.{request,response}`.
+- **Not yet verified:** streaming responses with response guards; the `/response`
+  webhook payload shape; `scope: toolOutput` behaviour; real provider wiring
+  (Ollama/Bedrock/NVIDIA via OpenAI-compatible). Docker could not bind-mount the
+  scratchpad (used `-c` config bytes) -- irrelevant for repo folders.
