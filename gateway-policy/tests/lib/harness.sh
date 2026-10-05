@@ -17,6 +17,42 @@ HARNESS_PORT="${HARNESS_PORT:-14100}"
 _LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 _NET=gp-test-net
 
+# Saved gateway log: appended to after each run, size-capped and rotated so it can never
+# grow without bound. Total worst case is about (HARNESS_LOG_KEEP + 1) * HARNESS_LOG_MAX_KB
+# plus one run's worth (~50 KB). The directory is gitignored: logs are never committed.
+HARNESS_LOG_DIR="${HARNESS_LOG_DIR:-$_LIB/../out}"
+HARNESS_LOG_MAX_KB="${HARNESS_LOG_MAX_KB:-5120}"
+HARNESS_LOG_KEEP="${HARNESS_LOG_KEEP:-3}"
+_LOG_FILE="$HARNESS_LOG_DIR/gateway-guardrails.log"
+
+_rotate_log() {  # gateway-guardrails.log -> .1 -> .2 ... ; the oldest is dropped
+  [ -f "$_LOG_FILE" ] || return 0
+  local size i
+  size=$(wc -c <"$_LOG_FILE" | tr -d ' ')
+  [ "$size" -lt $((HARNESS_LOG_MAX_KB * 1024)) ] && return 0
+  rm -f "$_LOG_FILE.$HARNESS_LOG_KEEP"
+  i=$HARNESS_LOG_KEEP
+  while [ "$i" -gt 1 ]; do
+    [ -f "$_LOG_FILE.$((i - 1))" ] && mv "$_LOG_FILE.$((i - 1))" "$_LOG_FILE.$i"
+    i=$((i - 1))
+  done
+  mv "$_LOG_FILE" "$_LOG_FILE.1"
+}
+
+# harness_save_log -- call BEFORE harness_down (which removes the container and its logs).
+# Keeps only the gateway's per-request lines (status, guard, action, duration -- no request
+# bodies, so no PII), not the startup config dump, which can echo keys. Readiness probes
+# against /v1/models are dropped as noise.
+harness_save_log() {
+  docker inspect gp-gw >/dev/null 2>&1 || return 0
+  mkdir -p "$HARNESS_LOG_DIR"
+  _rotate_log
+  {
+    printf '# run %s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${0##*/}"
+    docker logs gp-gw 2>&1 | grep -E '[[:space:]]request gateway=' | grep -v 'http.path=/v1/models'
+  } >>"$_LOG_FILE"
+}
+
 harness_config() {  # $1 = fragment path
   cat <<EOF
 llm:

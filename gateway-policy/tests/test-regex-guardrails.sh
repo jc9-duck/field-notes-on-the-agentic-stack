@@ -19,7 +19,7 @@ assert_eq() { [ "$2" = "$3" ] && ok "$1" || bad "$1" "expected [$2] got [$3]"; }
 assert_contains() { case "$2" in *"$3"*) ok "$1";; *) bad "$1" "expected to contain [$3] in [$2]";; esac; }
 assert_lacks()    { case "$2" in *"$3"*) bad "$1" "must not contain [$3] in [$2]";; *) ok "$1";; esac; }
 
-trap harness_down EXIT
+trap 'harness_save_log; harness_down' EXIT
 echo "== validating policy"
 V=$(harness_validate "$POLICY"); assert_eq "config validates" "Configuration is valid!" "$V"
 echo "== starting gateway + mock upstream"

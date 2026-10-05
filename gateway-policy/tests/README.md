@@ -13,6 +13,35 @@ bash gateway-policy/tests/test-regex-guardrails.sh   # needs docker, curl, jq; ~
   fragment; `chat`, `upstream_saw`, `assistant_said` helpers. The config is passed as
   bytes (`-c`), so there is no bind-mount or file-sharing setup. Containers are
   `gp-mock` / `gp-gw` on host port `14100` (override with `HARNESS_PORT`).
+- `clean.sh` -- housekeeping: removes leftover `gp-*` containers/network and saved logs
+  older than 14 days; `clean.sh --all` deletes every saved log.
 - `test-regex-guardrails.sh` -- replays `../fixtures/` against `../llm-guardrails.yaml`:
   SSN/card -> 403, email/phone/address/account/IBAN -> masked, clean control untouched,
   response masking, and the pinned tool-result gap.
+
+## Saved logs
+
+After each run the harness appends the gateway's per-request log lines to
+`gateway-policy/tests/out/gateway-guardrails.log` (the container, and its own logs, are
+removed right after). Only request lines are kept: status, which guard fired, the action,
+duration. There are no request bodies, so no PII, and the startup config dump (which can
+echo keys) is dropped.
+
+- **Size-capped.** At 5 MB (`HARNESS_LOG_MAX_KB`) the file rotates to `.1`, `.2`, `.3`
+  (`HARNESS_LOG_KEEP`) and the oldest is deleted, so the total stays around 20 MB at most.
+  One run is ~50 KB, so that is roughly 100 runs per file.
+- **Never committed.** `gateway-policy/tests/out/` is gitignored. Logs are runtime output,
+  not source; when a log is worth showing, paste a short sample here (below) instead.
+- **Cleanup:** `bash gateway-policy/tests/clean.sh` (or `--all`).
+
+Sample, from a real run (trimmed: timestamp and source address removed). The
+`agw.ai.guardrails` field is what to assert on or screenshot:
+
+```
+http.status=403 protocol=llm agw.ai.guardrails=[{"phase": "request", "guard": "regex", "action": "reject"}] error="request rejected by regex guardrail" reason=Guardrail duration=3ms
+http.status=200 protocol=llm gen_ai.request.model=gpt-test agw.ai.guardrails=[{"phase": "request", "guard": "regex", "action": "mask"}] duration=12ms
+http.status=200 protocol=llm gen_ai.request.model=gpt-test duration=1ms
+```
+
+Reject (SSN in the prompt), mask (email redacted, request still sent), and a clean
+request with no guardrail field at all.
