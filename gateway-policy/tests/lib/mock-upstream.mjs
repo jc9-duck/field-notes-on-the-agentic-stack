@@ -16,10 +16,20 @@ const read = (req) => new Promise((resolve) => {
   req.on('end', () => resolve(body));
 });
 
+// POST /next {text}: the NEXT chat completion replies with that text, once. The reply lives
+// in the mock, not in the request, so a request-side guard that reads the prompt never sees
+// (or reacts to) a trigger string, and response-side tests need no special prompt at all.
+let nextReply = null;
+
 http.createServer(async (req, res) => {
   res.setHeader('content-type', 'application/json');
   if (req.method === 'GET' && req.url === '/last') {
     res.end(JSON.stringify(last));
+    return;
+  }
+  if (req.method === 'POST' && req.url === '/next') {
+    nextReply = JSON.parse((await read(req)) || '{}').text ?? null;
+    res.end('{"ok":true}');
     return;
   }
   const raw = await read(req);
@@ -30,7 +40,8 @@ http.createServer(async (req, res) => {
   // RESPOND_B64:<base64> lets a test make the reply contain PII without putting that
   // PII in the request (which the request-side guards would reject first).
   const b = text.match(/RESPOND_B64:([A-Za-z0-9+/=]+)/);
-  const reply = b ? Buffer.from(b[1], 'base64').toString('utf8') : m ? m[1] : 'ok';
+  let reply = b ? Buffer.from(b[1], 'base64').toString('utf8') : m ? m[1] : 'ok';
+  if (nextReply !== null) { reply = nextReply; nextReply = null; }
   res.end(JSON.stringify({
     id: 'mock-1', object: 'chat.completion', created: 0, model: last.model || 'mock',
     choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content: reply } }],

@@ -72,7 +72,7 @@ harness_validate() {  # $1 = fragment path
 }
 
 harness_down() {
-  docker rm -f gp-mock gp-gw >/dev/null 2>&1
+  docker rm -f gp-mock gp-gw gp-judge >/dev/null 2>&1
   docker network rm "$_NET" >/dev/null 2>&1
 }
 
@@ -122,3 +122,40 @@ upstream_saw() {
 
 # assistant_said -> assistant text from the last BODY
 assistant_said() { printf '%s' "$BODY" | jq -r '.choices[0].message.content // empty' 2>/dev/null; }
+
+# ---- LLM judge (optional): gateway-policy/judge-webhook + Ollama on the host ----
+JUDGE_MODEL="${JUDGE_MODEL:-llama3.1:8b}"
+JUDGE_OLLAMA_URL="${JUDGE_OLLAMA_URL:-http://host.docker.internal:11434}"
+JUDGE_PORT="${JUDGE_PORT:-19100}"
+
+# Is Ollama up on this host with the judge model pulled? Tests skip (not fail) if not.
+harness_ollama_ready() {
+  curl -s -m 3 localhost:11434/api/tags | jq -e --arg m "$JUDGE_MODEL" '.models[] | select(.name == $m)' >/dev/null 2>&1
+}
+
+# Start the judge on the harness network, aliased `judge-webhook` to match the policy
+# fragment. Waits until the model is warm (/ready): a cold load can take ~15s and the
+# gateway only gives a webhook 10s. Call AFTER harness_up (which recreates the network).
+harness_start_judge() {
+  docker rm -f gp-judge >/dev/null 2>&1
+  mkdir -p "$HARNESS_LOG_DIR"
+  docker run -d --name gp-judge --network "$_NET" --network-alias judge-webhook \
+    -p "$JUDGE_PORT":9100 \
+    -v "$_LIB/../../judge-webhook:/app:ro" -v "$HARNESS_LOG_DIR:/logs" \
+    -e OLLAMA_URL="$JUDGE_OLLAMA_URL" -e JUDGE_MODEL="$JUDGE_MODEL" -e LOG_DIR=/logs \
+    "$MOCK_IMAGE" node /app/server.mjs >/dev/null || return 1
+  for _ in $(seq 1 180); do
+    curl -s -o /dev/null -m 2 -f "localhost:$JUDGE_PORT/ready" && return 0
+    sleep 1
+  done
+  echo "judge did not become ready:" >&2; docker logs gp-judge 2>&1 | tail -10 >&2; return 1
+}
+
+harness_stop_judge() { docker stop gp-judge >/dev/null 2>&1; }
+
+# mock_next_reply <text> -- the mock's NEXT completion replies with this text (once), so a
+# response-side case needs no trigger string in the prompt for a request-side guard to react to.
+mock_next_reply() {
+  jq -cn --arg t "$1" '{text:$t}' |
+    docker exec -i gp-mock node -e "let b='';process.stdin.on('data',c=>b+=c).on('end',()=>fetch('http://localhost:9001/next',{method:'POST',body:b}))"
+}

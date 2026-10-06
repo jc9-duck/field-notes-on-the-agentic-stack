@@ -13,6 +13,16 @@ bash gateway-policy/tests/test-regex-guardrails.sh   # needs docker, curl, jq; ~
   fragment; `chat`, `upstream_saw`, `assistant_said` helpers. The config is passed as
   bytes (`-c`), so there is no bind-mount or file-sharing setup. Containers are
   `gp-mock` / `gp-gw` on host port `14100` (override with `HARNESS_PORT`).
+- `test-judge-guardrails.sh` -- the LLM judge, through a real gateway, driven by
+  `../fixtures/judge-cases.json` (28 labeled cases, request and response). Phase A runs the
+  built-in regex only (`../llm-guardrails-builtin.yaml`) and pins what it misses; phase B adds the
+  judge (`../llm-judge.yaml`) and shows the same cases caught; phase C stops the judge and checks
+  failClosed vs failOpen. Needs Ollama on the host with `llama3.1:8b` pulled, and **skips cleanly**
+  without it. Slow cases (judge over the gateway's fixed 10 s budget) are reported as `SLOW`,
+  never as a pass. See `../judge-webhook/README.md` for the design and the latency limit.
+  `lib/harness.sh` gains `harness_start_judge`, `harness_stop_judge`, `harness_ollama_ready` and
+  `mock_next_reply` (the mock's next completion replies with given text, so response-side cases
+  need no trigger string in the prompt).
 - `clean.sh` -- housekeeping: removes leftover `gp-*` containers/network and saved logs
   older than 14 days; `clean.sh --all` deletes every saved log.
 - `test-regex-guardrails.sh` -- replays `../fixtures/` against `../llm-guardrails.yaml`:

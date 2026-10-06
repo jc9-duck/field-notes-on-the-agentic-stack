@@ -1,0 +1,32 @@
+  # agentgateway's BUILT-IN regex guardrails only, no custom patterns: the defaults.
+  # Same shape as llm-guardrails.yaml (the `llm.policies` subtree, indented to nest under
+  # a top-level `llm:`), but this one is the baseline the LLM judge is measured against.
+  #
+  # Measured against v1.5.0 (see tests/test-judge-guardrails.sh, phase A): these catch
+  # SSNs, Visa/Amex cards, emails and common phone formats. They do NOT catch street
+  # addresses, bank account numbers, IBANs, Mastercard 2-series cards, or any prompt
+  # injection, and the built-in phoneNumber also mangles part numbers and build strings.
+  # That gap is what llm-judge.yaml fills.
+  policies:
+    guardrails:
+      request:
+        # Hard stops first: the built-ins overlap (a bare 987-65-4321 is an SSN to `ssn`
+        # but a phone number to `phoneNumber`), so reject before mask.
+        - regex:
+            action: reject
+            rules:
+              - builtin: ssn
+              - builtin: creditCard
+        - regex:
+            action: mask
+            rules:
+              - builtin: email
+              - builtin: phoneNumber
+      response:
+        - regex:
+            action: mask
+            rules:
+              - builtin: email
+              - builtin: ssn
+              - builtin: creditCard
+              - builtin: phoneNumber
