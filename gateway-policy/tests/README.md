@@ -23,6 +23,12 @@ bash gateway-policy/tests/test-regex-guardrails.sh   # needs docker, curl, jq; ~
   `lib/harness.sh` gains `harness_start_judge`, `harness_stop_judge`, `harness_ollama_ready` and
   `mock_next_reply` (the mock's next completion replies with given text, so response-side cases
   need no trigger string in the prompt).
+- `test-nemo-guardrails.sh` -- NVIDIA NeMo Guardrails as the LLM guardrail (`../llm-nemo.yaml`),
+  same 28 cases, rails running on a Bedrock model. NeMo can only block, so judge-"mask" cases are
+  expected to be rejected whole (451). Also checks failClosed vs failOpen with NeMo down. Needs
+  `AWS_BEARER_TOKEN_BEDROCK` exported and **skips cleanly** without it; the first run builds the
+  pinned NeMo image. Harness additions: `harness_start_nemo`, `harness_stop_nemo`,
+  `harness_bedrock_ready`. See `../nemo/README.md` for the design and the model comparison.
 - `clean.sh` -- housekeeping: removes leftover `gp-*` containers/network and saved logs
   older than 14 days; `clean.sh --all` deletes every saved log.
 - `test-regex-guardrails.sh` -- replays `../fixtures/` against `../llm-guardrails.yaml`:

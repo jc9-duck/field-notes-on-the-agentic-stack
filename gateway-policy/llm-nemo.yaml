@@ -1,0 +1,47 @@
+  # Built-in regex guardrails PLUS NVIDIA NeMo Guardrails as the LLM guardrail, both directions.
+  # The `llm.policies` subtree, indented to nest under a top-level `llm:`. This is the NeMo
+  # counterpart of llm-judge.yaml (the Ollama judge); the two are interchangeable behind the
+  # same webhook contract.
+  #
+  # Order: cheap deterministic regex first, then the NeMo webhook on what survives.
+  #
+  # `nemo-adapter` is a small service (gateway-policy/nemo/adapter) that turns the gateway's
+  # /request and /response calls into NeMo `POST /v1/checks`. NeMo's rails run on a Bedrock
+  # model through Bedrock's OpenAI-compatible endpoint (the same call switchyard makes).
+  #
+  # Difference from the judge worth knowing: NeMo's self-check rails can only BLOCK. A message
+  # containing a street address is rejected whole (HTTP 451), where the Ollama judge masks just
+  # the span and lets the rest through.
+  #
+  # failureMode: failClosed, as in llm-judge.yaml: if NeMo/Bedrock is down or slow the request is
+  # not let through unguarded. The gateway gives a webhook a fixed 10 s; NeMo + a hosted model
+  # answers in about 1 s, so this budget is rarely the issue it is for a local judge.
+  policies:
+    guardrails:
+      request:
+        - regex:
+            action: reject
+            rules:
+              - builtin: ssn
+              - builtin: creditCard
+        - regex:
+            action: mask
+            rules:
+              - builtin: email
+              - builtin: phoneNumber
+        - webhook:
+            target:
+              host: nemo-adapter:9200
+            failureMode: failClosed
+      response:
+        - regex:
+            action: mask
+            rules:
+              - builtin: email
+              - builtin: ssn
+              - builtin: creditCard
+              - builtin: phoneNumber
+        - webhook:
+            target:
+              host: nemo-adapter:9200
+            failureMode: failClosed
