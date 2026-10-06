@@ -72,7 +72,7 @@ harness_validate() {  # $1 = fragment path
 }
 
 harness_down() {
-  docker rm -f gp-mock gp-gw gp-judge >/dev/null 2>&1
+  docker rm -f gp-mock gp-gw gp-judge gp-nemo gp-nemo-adapter >/dev/null 2>&1
   docker network rm "$_NET" >/dev/null 2>&1
 }
 
@@ -152,6 +152,41 @@ harness_start_judge() {
 }
 
 harness_stop_judge() { docker stop gp-judge >/dev/null 2>&1; }
+
+# ---- NeMo Guardrails (optional): gateway-policy/nemo, rails LLM = a Bedrock model ----
+NEMO_RAILS_MODEL="${NEMO_RAILS_MODEL:-qwen.qwen3-coder-next}"
+NEMO_ADAPTER_PORT="${NEMO_ADAPTER_PORT:-19200}"
+
+# The rails call Bedrock with the bearer token from the environment (passed to the container
+# by NAME, so the value never appears on a command line). Tests skip if it is not exported.
+harness_bedrock_ready() { [ -n "${AWS_BEARER_TOKEN_BEDROCK:-}" ]; }
+
+# Start NeMo (built once from nemo/Dockerfile, pinned) with the rails config and the chosen
+# Bedrock model, plus the adapter webhook aliased `nemo-adapter` to match the policy fragment.
+# Call AFTER harness_up (which recreates the network).
+harness_start_nemo() {
+  docker image inspect gp-nemo >/dev/null 2>&1 || docker build -q -t gp-nemo "$_LIB/../../nemo" >/dev/null || return 1
+  local cfg="$HARNESS_LOG_DIR/nemo-config"
+  rm -rf "$cfg"; mkdir -p "$cfg"
+  cp -R "$_LIB/../../nemo/config/gateway" "$cfg/gateway"
+  # Swap the model on the `model:` line so other Bedrock models can be compared without editing the file.
+  sed -i.bak "s|^\(    model: \).*|\1$NEMO_RAILS_MODEL|" "$cfg/gateway/config.yml"; rm -f "$cfg/gateway/config.yml.bak"
+  docker rm -f gp-nemo gp-nemo-adapter >/dev/null 2>&1
+  docker run -d --name gp-nemo --network "$_NET" --network-alias nemo \
+    -e AWS_BEARER_TOKEN_BEDROCK -v "$cfg":/config gp-nemo >/dev/null || return 1
+  docker run -d --name gp-nemo-adapter --network "$_NET" --network-alias nemo-adapter \
+    -p "$NEMO_ADAPTER_PORT":9200 \
+    -v "$_LIB/../../nemo/adapter:/app:ro" -v "$HARNESS_LOG_DIR:/logs" \
+    -e NEMO_URL=http://nemo:8000 -e NEMO_MODEL="$NEMO_RAILS_MODEL" -e LOG_DIR=/logs \
+    "$MOCK_IMAGE" node /app/server.mjs >/dev/null || return 1
+  for _ in $(seq 1 120); do
+    curl -s -o /dev/null -m 2 -f "localhost:$NEMO_ADAPTER_PORT/ready" && return 0
+    sleep 1
+  done
+  echo "nemo did not become ready:" >&2; docker logs gp-nemo 2>&1 | tail -10 >&2; return 1
+}
+
+harness_stop_nemo() { docker stop gp-nemo-adapter gp-nemo >/dev/null 2>&1; }
 
 # mock_next_reply <text> -- the mock's NEXT completion replies with this text (once), so a
 # response-side case needs no trigger string in the prompt for a request-side guard to react to.
