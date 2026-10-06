@@ -29,5 +29,19 @@ Each column maps to a guard decision (configured in the guardrails step, asserte
 `gateway-policy/tests/`): SSN and card -> **reject**; email and phone -> **mask**;
 street address and bank info -> not covered by any built-in, so they need a **custom
 regex** (or the LLM judge) -- that gap is part of the story. `clean-control.txt` must
-come through unchanged. Observed built-in behaviour (which phone/card formats match)
-gets recorded here once the regex step lands.
+come through unchanged.
+
+## Observed built-in behaviour (agentgateway v1.5.0)
+
+Measured with these fixtures; the resulting policy is `../llm-guardrails.yaml`, asserted
+by `../tests/test-regex-guardrails.sh`.
+
+| Built-in | Result on the fixtures |
+| --- | --- |
+| `ssn` | Matches all 15 (`987-65-43xx`) -- and any bare 9-digit run, so ABA routing numbers are caught too. |
+| `creditCard` | Misses spaced Amex (`3714 496353 98431`) and Mastercard 2-series (`2223 0031 ...`); 13/15 test numbers match. Custom patterns fill both gaps. |
+| `email` | Matches all 15. |
+| `phoneNumber` | Matches every phone format, but is greedy: also masks `4829-1173-0056` and `2026.10.04-117` in `clean-control.txt`. Replaced by a stricter custom pattern. |
+| overlap | Built-ins overlap (`987-65-4321` is "a phone number" to `phoneNumber`), and guards run in order -- reject guards go first. |
+| addresses, account numbers, IBAN | No built-in exists -> custom regex. |
+| tool-result messages | Not scanned at all in v1.5.0 (known gap, pinned in the test). |
