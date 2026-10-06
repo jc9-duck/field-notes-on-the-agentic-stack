@@ -1,0 +1,46 @@
+  # Built-in regex guardrails PLUS the LLM judge, in both directions. The `llm.policies`
+  # subtree, indented to nest under a top-level `llm:`.
+  #
+  # Order is deliberate: guards run top to bottom and stop on reject, so the cheap,
+  # deterministic regex guards go first and the slow LLM judge only sees what survives
+  # (already masked by the regex guards above it).
+  #
+  # The judge (gateway-policy/judge-webhook) is a separate service the gateway calls over
+  # HTTP: POST /request before the model, POST /response after it. `judge-webhook` is the
+  # service name; the test harness gives its container that network alias.
+  #
+  # failureMode: failClosed. The gateway gives a webhook a fixed 10s. If the judge is down,
+  # slow or errors, the request is NOT let through unguarded. That is the safe default for
+  # a guardrail, at the price of availability; failOpen is the opposite trade (tested in
+  # tests/test-judge-guardrails.sh, phase C).
+  #
+  # Status codes tell you who caught it: regex rejects return 403, the judge returns 451.
+  policies:
+    guardrails:
+      request:
+        - regex:
+            action: reject
+            rules:
+              - builtin: ssn
+              - builtin: creditCard
+        - regex:
+            action: mask
+            rules:
+              - builtin: email
+              - builtin: phoneNumber
+        - webhook:
+            target:
+              host: judge-webhook:9100
+            failureMode: failClosed
+      response:
+        - regex:
+            action: mask
+            rules:
+              - builtin: email
+              - builtin: ssn
+              - builtin: creditCard
+              - builtin: phoneNumber
+        - webhook:
+            target:
+              host: judge-webhook:9100
+            failureMode: failClosed

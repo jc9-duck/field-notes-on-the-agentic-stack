@@ -117,3 +117,22 @@ Run against a mock OpenAI upstream + logging webhook; throwaway, not committed.
   webhook payload shape; `scope: toolOutput` behaviour; real provider wiring
   (Ollama/Bedrock/NVIDIA via OpenAI-compatible). Docker could not bind-mount the
   scratchpad (used `-c` config bytes) -- irrelevant for repo folders.
+
+## Step 3 results (LLM judge, 2026-10-05, agentgateway v1.5.0)
+Built and measured in `judge-webhook/` (design and numbers in its README). Resolves the spike
+items above that were marked not verified:
+- **`/response` payload:** `{"body":{"choices":[{"message":{"role","content"}}]}}`. Webhook
+  replies may `pass`, `mask` (`{"body":{"choices":[...]}}`) or `reject` on the response side too
+  (unlike regex, where response matches are always masked). Source: `llm/policy/webhook.rs`.
+- **Config:** `webhook: {target: {host: name:port}, failureMode: failClosed|failOpen}`.
+- **The gateway gives a webhook a fixed 10 s** (`with_default_timeout`, not configurable). That is the
+  binding constraint: a local `llama3.1:8b` judge (~16 tok/s on an M2) takes 2-11 s, and in the e2e run
+  4 of 28 cases (14%) exceeded it and failed closed. `qwen2.5:14b` is too slow; `llama3.2:3b` is
+  3x faster but missed 3 of 28.
+- **Layering interaction:** the built-in `phoneNumber` regex mangles part numbers and build strings
+  into `<PHONE_NUMBER>`; the judge then saw garbled text, invented spans and took ~8 s. Fixed by
+  giving the judge a cleaned view (`[removed] `) and never re-redacting a placeholder.
+- **Still not verified:** streaming responses with response guards; `scope: toolOutput`; real
+  provider wiring through `llm:` (step 4). The gateway source also contains MCP guardrail code
+  (`mcp/guardrails`); whether it exists in v1.5.0 is untested and worth checking for the
+  tool-result gap.
