@@ -25,7 +25,7 @@ RUN case "$(uname -m)" in \
     && apt-get update && apt-get install -y --no-install-recommends musl-tools \
     && cargo install --locked switchyard-server --target "$MUSL_TARGET"
 
-FROM node:22-slim
+FROM node:26-slim
 
 # Pi baked into the image so you're not reinstalling on every container start.
 # --ignore-scripts: disable install-time lifecycle scripts pi doesn't need.
