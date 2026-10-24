@@ -136,3 +136,17 @@ items above that were marked not verified:
   provider wiring through `llm:` (step 4). The gateway source also contains MCP guardrail code
   (`mcp/guardrails`); whether it exists in v1.5.0 is untested and worth checking for the
   tool-result gap.
+
+## NeMo Guardrails results (2026-10-06, NeMo v0.24.1, Bedrock rails model)
+Built in `nemo/` (design, numbers and caveats in its README). Resolves the NeMo half of issue #25.
+- **`POST /v1/checks`** exists and returns `{status: passed|modified|blocked, content, rail}`; it maps onto the
+  webhook's pass / mask / reject. The check API does not run tool rails.
+- **Bedrock works as the rails LLM** via `engine: openai` + `parameters.base_url` (same call and bearer token as
+  switchyard). The `model` field of each request overrides the config, so the adapter sends the real id.
+- **Measured on the 28 cases:** `qwen.qwen3-coder-next` 28/28, `zai.glm-5` 27/28, `openai.gpt-oss-20b-1:0` 16/28
+  (reasoning-model output breaks the yes/no parsing, so NeMo blocks harmless text). Through the gateway the
+  median check is ~0.7 s (max ~3.2 s) vs 3-4 s median / 8-11 s max for the local Ollama judge, so the
+  gateway's fixed 10 s budget is not a problem here.
+- **Tradeoffs:** self-check rails only block (no span masking); the text being checked goes to Bedrock rather
+  than staying on the machine; the same placeholder trap as the judge (cleaned view fixes it).
+- **Not tried:** NeMo's masking rails (GLiNER PII, hosted by NVIDIA), jailbreak/content-safety models, streaming.

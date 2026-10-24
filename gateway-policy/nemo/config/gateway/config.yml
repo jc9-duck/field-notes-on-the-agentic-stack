@@ -1,0 +1,23 @@
+# NeMo Guardrails rails for agentgateway's webhook. The rails' LLM is a Bedrock model reached
+# through Bedrock's OpenAI-compatible endpoint with the same bearer token switchyard uses
+# (AWS_BEARER_TOKEN_BEDROCK), so there is no extra credential and no NVIDIA dependency.
+#
+# Model choice matters a lot (measured on the 28 labeled cases; see nemo/README.md):
+# qwen.qwen3-coder-next 28/28, zai.glm-5 27/28, openai.gpt-oss-20b-1:0 16/28 (a reasoning model:
+# its output breaks the yes/no parsing and NeMo then blocks harmless text). NeMo also lets the
+# `model` field of each /v1/checks request override this one, so the adapter sends the same id.
+models:
+  - type: main
+    engine: openai
+    model: qwen.qwen3-coder-next
+    api_key_env_var: AWS_BEARER_TOKEN_BEDROCK
+    parameters:
+      base_url: https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1
+
+rails:
+  input:
+    flows:
+      - self check input
+  output:
+    flows:
+      - self check output
